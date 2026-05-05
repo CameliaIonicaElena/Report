@@ -32,27 +32,43 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 st.sidebar.header("Filters")
 
+select_all = st.sidebar.checkbox("Select all", value=True)
+
 # =========================
-# DATE FILTER
+# DATE
 # =========================
-dates = df["DATE"].dropna().unique()
-selected_date = st.sidebar.selectbox("DATE", sorted(dates))
+dates = sorted(df["DATE"].dropna().unique())
+
+if select_all:
+    selected_date = dates[-1]  # sau toate datele
+else:
+    selected_date = st.sidebar.selectbox("DATE", dates)
 
 df_filtered = df[df["DATE"] == selected_date]
 
 # =========================
-# RAW MATERIAL FILTER
+# RAW MATERIAL
 # =========================
-materials = df_filtered["RAW MATERIAL"].dropna().unique()
-selected_material = st.sidebar.selectbox("RAW MATERIAL", sorted(materials))
+materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
+
+if select_all:
+    selected_material = materials[0]
+else:
+    selected_material = st.sidebar.selectbox("RAW MATERIAL", materials)
 
 df_filtered = df_filtered[df_filtered["RAW MATERIAL"] == selected_material]
 
 # =========================
-# COLOR FILTER
+# COLOR
 # =========================
-colors = df_filtered["COLOR"].dropna().unique()
-selected_color = st.sidebar.selectbox("COLOR", sorted(colors))
+colors = sorted(df_filtered["COLOR"].dropna().unique())
+
+if select_all:
+    selected_color = colors[0]
+else:
+    selected_color = st.sidebar.selectbox("COLOR", colors)
+
+df_filtered = df_filtered[df_filtered["COLOR"] == selected_color]
 
 df_filtered = df_filtered[df_filtered["COLOR"] == selected_color]
 # =========================
