@@ -8,6 +8,7 @@ from scipy.stats import norm
 # TITLE
 # =========================
 st.title("SPC Dashboard")
+st.set_page_config(layout="wide")  # 🔥 MUST BE FIRST STREAMLIT COMMAND
 
 # =========================
 # LOAD DATA
