@@ -5,10 +5,14 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 
 # =========================
+# STREAMLIT CONFIG (MUST BE FIRST)
+# =========================
+st.set_page_config(layout="wide")
+
+# =========================
 # TITLE
 # =========================
 st.title("SPC Dashboard")
-st.set_page_config(layout="wide")  # 🔥 MUST BE FIRST STREAMLIT COMMAND
 
 # =========================
 # LOAD DATA
@@ -31,7 +35,6 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
-
 df["DATE"] = pd.to_datetime(df["DATE"])
 
 # =========================
@@ -140,10 +143,21 @@ stats["Capability"] = stats["Cpk"].apply(capability)
 stats["OK"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
 
 # =========================
-# TABLE
+# TABLE STYLE (🔥 FIX REQUESTED)
 # =========================
+def highlight_oos(df):
+    style = pd.DataFrame("", index=df.index, columns=df.columns)
+
+    style.loc[df["Above OOS"] > 0, "Above OOS"] = "color: red; font-weight: bold"
+    style.loc[df["Below OOS"] > 0, "Below OOS"] = "color: red; font-weight: bold"
+
+    return style
+
 st.subheader("SPC Summary")
-st.dataframe(stats, use_container_width=True)
+st.dataframe(
+    stats.style.apply(highlight_oos, axis=None),
+    use_container_width=True
+)
 
 # =========================
 # CHARACTERISTIC
