@@ -3,31 +3,42 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm
+import os
 
 # =========================
-# STREAMLIT CONFIG (MUST BE FIRST)
+# CONFIG
 # =========================
 st.set_page_config(layout="wide")
+st.title("SPC Dashboard")
 
 # =========================
-# TITLE
+# DATA FILES (SAFE PATHS)
 # =========================
-st.title("SPC Dashboard")
+BASE_DIR = os.path.dirname(__file__)
+
+files = {
+    "Dataset Original": os.path.join(BASE_DIR, "Test-Measurements&Specs.xlsx"),
+    "Dataset Test1": os.path.join(BASE_DIR, "Test-Measurements&Specs1.xlsx"),
+    "Dataset Test2": os.path.join(BASE_DIR, "Test-Measurements&Specs2.xlsx")
+}
+
+selected_dataset = st.sidebar.selectbox(
+    "Select dataset",
+    list(files.keys())
+)
+
+file = files[selected_dataset]
+
+# =========================
+# CHECK FILE EXISTS (🔥 IMPORTANT)
+# =========================
+if not os.path.exists(file):
+    st.error(f"File not found: {file}")
+    st.stop()
 
 # =========================
 # LOAD DATA
 # =========================
-files = {
-    "Dataset Original": "Test-Measurements&Specs.xlsx",
-    "Dataset Test1": "Test-Measurements&Specs1.xlsx",
-    "Dataset Test2": "Test-Measurements&Specs2.xlsx"
-}
-selected_dataset = st.sidebar.selectbox(
-    "Select dataset",
-    list(files.keys())
-) 
-file = files[selected_dataset]
-
 df_meas = pd.read_excel(file, sheet_name="Measurements")
 df_specs = pd.read_excel(file, sheet_name="Specs")
 
@@ -45,27 +56,6 @@ df_long = df_meas.melt(
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 df["DATE"] = pd.to_datetime(df["DATE"])
-
-# =========================
-# FILTERS
-# =========================
-st.sidebar.header("Filters")
-
-min_date = df["DATE"].min()
-max_date = df["DATE"].max()
-
-start_date, end_date = st.sidebar.date_input(
-    "DATE range",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date
-)
-
-df_filtered = df[
-    (df["DATE"] >= pd.to_datetime(start_date)) &
-    (df["DATE"] <= pd.to_datetime(end_date))
-]
-
 # RAW MATERIAL
 materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
 select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
