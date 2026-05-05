@@ -174,3 +174,53 @@ for ch in selected:
     ax.grid(True)
 
     st.pyplot(fig)
+
+from scipy.stats import norm
+import numpy as np
+import matplotlib.pyplot as plt
+import streamlit as st
+
+st.subheader("Histogram + Normal Curve")
+
+char = st.selectbox("Select Characteristic (Histogram)", df["Characteristic"].unique())
+
+data = df[df["Characteristic"] == char]["Value"].dropna()
+
+if len(data) > 1:
+
+    mean = data.mean()
+    std = data.std()
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+
+    # =========================
+    # HISTOGRAM
+    # =========================
+    ax.hist(data, bins=20, density=True, alpha=0.6, color="skyblue")
+
+    # =========================
+    # NORMAL CURVE
+    # =========================
+    x = np.linspace(data.min(), data.max(), 100)
+    y = norm.pdf(x, mean, std)
+
+    ax.plot(x, y, color="red", linewidth=2, label="Normal curve")
+
+    # =========================
+    # LINES
+    # =========================
+    ax.axvline(mean, color="green", linestyle="--", label="Mean")
+
+    spec = stats[stats["Characteristic"] == char].iloc[0]
+
+    ax.axvline(spec["USL"], color="red", linestyle="--", label="USL")
+    ax.axvline(spec["LSL"], color="red", linestyle="--", label="LSL")
+
+    ax.set_title(f"{char} | Histogram + Normal Curve")
+    ax.legend()
+    ax.grid(True)
+
+    st.pyplot(fig)
+
+else:
+    st.warning("Not enough data for histogram")
