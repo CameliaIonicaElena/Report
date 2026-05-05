@@ -238,3 +238,58 @@ if len(values) > 1:
 
 else:
     st.warning("Not enough data for histogram")
+
+st.subheader("I-MR Control Chart")
+
+values = data["Value"].dropna().reset_index(drop=True)
+
+if len(values) > 1:
+
+    # =========================
+    # INDIVIDUALS
+    # =========================
+    mean = values.mean()
+    mr = values.diff().abs().dropna()
+
+    mr_mean = mr.mean()
+
+    # constants for I-MR
+    d2 = 1.128  # for MR of 2
+
+    sigma = mr_mean / d2
+
+    UCL = mean + 3 * sigma
+    LCL = mean - 3 * sigma
+
+    # =========================
+    # PLOT
+    # =========================
+    fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+
+    # ---- Individuals chart ----
+    ax[0].plot(values.values, marker="o", linewidth=1)
+    ax[0].axhline(mean, color="green", label="Mean")
+    ax[0].axhline(UCL, color="red", linestyle="--", label="UCL")
+    ax[0].axhline(LCL, color="red", linestyle="--", label="LCL")
+
+    ax[0].set_title(f"I Chart - {char}")
+    ax[0].legend()
+    ax[0].grid(True)
+
+    # ---- Moving Range chart ----
+    ax[1].plot(mr.values, marker="o", linewidth=1, color="orange")
+
+    MR_UCL = mr_mean * 3.267  # standard constant for MR(2)
+
+    ax[1].axhline(mr_mean, color="green", label="MR Mean")
+    ax[1].axhline(MR_UCL, color="red", linestyle="--", label="UCL")
+
+    ax[1].set_title("Moving Range Chart")
+    ax[1].legend()
+    ax[1].grid(True)
+
+    plt.tight_layout()
+    st.pyplot(fig)
+
+else:
+    st.warning("Not enough data for I-MR chart")
