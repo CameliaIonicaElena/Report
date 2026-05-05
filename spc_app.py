@@ -30,57 +30,50 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
+
+# =========================
+# FILTERS (IMPORTANT FIX)
+# =========================
 st.sidebar.header("Filters")
 
-select_all = st.sidebar.checkbox("Select all", value=True)
+# DATE RANGE
+df["DATE"] = pd.to_datetime(df["DATE"])
 
-# =========================
-# DATE
-# =========================
-dates = sorted(df["DATE"].dropna().unique())
+min_date = df["DATE"].min()
+max_date = df["DATE"].max()
 
-if select_all:
-    selected_date = dates[-1]  # sau toate datele
-else:
-    selected_date = st.sidebar.selectbox("DATE", dates)
+start_date, end_date = st.sidebar.date_input(
+    "DATE range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
 
-df_filtered = df[df["DATE"] == selected_date]
+df_filtered = df[
+    (df["DATE"] >= pd.to_datetime(start_date)) &
+    (df["DATE"] <= pd.to_datetime(end_date))
+]
 
-# =========================
 # RAW MATERIAL
-# =========================
 materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
-
-if select_all:
-    selected_material = materials[0]
-else:
-    selected_material = st.sidebar.selectbox("RAW MATERIAL", materials)
-
+selected_material = st.sidebar.selectbox("RAW MATERIAL", materials)
 df_filtered = df_filtered[df_filtered["RAW MATERIAL"] == selected_material]
 
-# =========================
 # COLOR
-# =========================
 colors = sorted(df_filtered["COLOR"].dropna().unique())
-
-if select_all:
-    selected_color = colors[0]
-else:
-    selected_color = st.sidebar.selectbox("COLOR", colors)
-
+selected_color = st.sidebar.selectbox("COLOR", colors)
 df_filtered = df_filtered[df_filtered["COLOR"] == selected_color]
 
-df_filtered = df_filtered[df_filtered["COLOR"] == selected_color]
 # =========================
-# SPEC LIMITS
+# SPEC LIMITS (IMPORTANT FIX → USE df_filtered)
 # =========================
-df["USL"] = df["Target"] + df["Upper Dev"]
-df["LSL"] = df["Target"] + df["Lower Dev"]
+df_filtered["USL"] = df_filtered["Target"] + df_filtered["Upper Dev"]
+df_filtered["LSL"] = df_filtered["Target"] + df_filtered["Lower Dev"]
 
 # =========================
 # GROUP STATS
 # =========================
-g = df.groupby("Characteristic")
+g = df_filtered.groupby("Characteristic")
 
 stats = pd.DataFrame({
     "Characteristic": g["Characteristic"].first(),
@@ -110,16 +103,16 @@ stats["Cpk"] = np.minimum(
 )
 
 # =========================
-# OUT OF SPEC COUNTS
+# OUT OF SPEC
 # =========================
-above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
-below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+above = df_filtered[df_filtered["Value"] > df_filtered["USL"]].groupby("Characteristic")["Value"].count()
+below = df_filtered[df_filtered["Value"] < df_filtered["LSL"]].groupby("Characteristic")["Value"].count()
 
 stats["Above lower tolerance limit"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below lower tolerance limit"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# CAPABILITY CLASS
+# CAPABILITY
 # =========================
 def capability(x):
     if pd.isna(x):
@@ -163,9 +156,6 @@ stats = stats[
     ]
 ]
 
-# =========================
-# TABLE DISPLAY
-# =========================
 st.subheader("SPC Summary")
 st.dataframe(stats)
 
@@ -174,11 +164,11 @@ st.dataframe(stats)
 # =========================
 char = st.selectbox("Select Characteristic", stats["Characteristic"])
 
-data = df[df["Characteristic"] == char]
+data = df_filtered[df_filtered["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 
 # =========================
-# LINE CHART (SPC)
+# CONTROL CHART
 # =========================
 st.subheader("Control Chart")
 
