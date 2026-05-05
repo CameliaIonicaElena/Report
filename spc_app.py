@@ -56,14 +56,33 @@ df_filtered = df[
 
 # RAW MATERIAL
 materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
-selected_material = st.sidebar.selectbox("RAW MATERIAL", materials)
-df_filtered = df_filtered[df_filtered["RAW MATERIAL"] == selected_material]
 
-# COLOR
+select_all_materials = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
+
+if select_all_materials:
+    selected_materials = materials
+else:
+    selected_materials = st.sidebar.multiselect(
+        "RAW MATERIAL",
+        materials,
+        default=[]
+    )
+
+df_filtered = df_filtered[df_filtered["RAW MATERIAL"].isin(selected_materials)]
 colors = sorted(df_filtered["COLOR"].dropna().unique())
-selected_color = st.sidebar.selectbox("COLOR", colors)
-df_filtered = df_filtered[df_filtered["COLOR"] == selected_color]
 
+select_all_colors = st.sidebar.checkbox("Select all COLOR", value=True)
+
+if select_all_colors:
+    selected_colors = colors
+else:
+    selected_colors = st.sidebar.multiselect(
+        "COLOR",
+        colors,
+        default=[]
+    )
+
+df_filtered = df_filtered[df_filtered["COLOR"].isin(selected_colors)]
 # =========================
 # SPEC LIMITS (IMPORTANT FIX → USE df_filtered)
 # =========================
