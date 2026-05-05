@@ -1,8 +1,12 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
-import streamlit as st
 import matplotlib.pyplot as plt
+from scipy.stats import norm
 
+# =========================
+# TITLE
+# =========================
 st.title("SPC Dashboard")
 
 # =========================
@@ -52,7 +56,7 @@ stats = pd.DataFrame({
 }).reset_index(drop=True)
 
 # =========================
-# EXTRA METRICS
+# DERIVED METRICS
 # =========================
 stats["Range"] = stats["Max"] - stats["Min"]
 stats["+3s"] = stats["Xbar"] + 3 * stats["Standard deviation"]
@@ -66,7 +70,7 @@ stats["Cpk"] = np.minimum(
 )
 
 # =========================
-# ABOVE / BELOW TOLERANCE
+# OUT OF SPEC COUNTS
 # =========================
 above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
 below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
@@ -93,7 +97,7 @@ stats["Process capability"] = stats["Cpk"].apply(capability)
 stats["Bi Process capability"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
 
 # =========================
-# FINAL ORDER
+# FINAL TABLE
 # =========================
 stats = stats[
     [
@@ -120,13 +124,13 @@ stats = stats[
 ]
 
 # =========================
-# STREAMLIT OUTPUT
+# TABLE DISPLAY
 # =========================
-st.subheader("SPC Table")
+st.subheader("SPC Summary")
 st.dataframe(stats)
 
 # =========================
-# SELECT CHARACTERISTIC
+# CHARACTERISTIC SELECTOR
 # =========================
 char = st.selectbox("Select Characteristic", stats["Characteristic"])
 
@@ -134,8 +138,10 @@ data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 
 # =========================
-# PLOT (SINGLE + CLEAN)
+# LINE CHART (SPC)
 # =========================
+st.subheader("Control Chart")
+
 fig, ax = plt.subplots(figsize=(10, 4))
 
 ax.plot(data["Value"].values, marker="o", linewidth=1, label="Measurements")
@@ -151,76 +157,35 @@ ax.grid(True)
 st.pyplot(fig)
 
 # =========================
-# MULTI-PLOT (SIXPACK STYLE)
+# HISTOGRAM + NORMAL CURVE
 # =========================
-st.subheader("All Characteristics Overview")
-
-selected = stats["Characteristic"].tolist()
-
-for ch in selected:
-
-    d = df[df["Characteristic"] == ch]
-    s = stats[stats["Characteristic"] == ch].iloc[0]
-
-    fig, ax = plt.subplots(figsize=(10, 3))
-
-    ax.plot(d["Value"].values, marker="o", linewidth=1)
-
-    ax.axhline(s["Xbar"], color="green")
-    ax.axhline(s["USL"], color="red")
-    ax.axhline(s["LSL"], color="red")
-
-    ax.set_title(f"{ch} | Cp={s['Cp']:.2f} | Cpk={s['Cpk']:.2f}")
-    ax.grid(True)
-
-    st.pyplot(fig)
-
-from scipy.stats import norm
-import numpy as np
-import matplotlib.pyplot as plt
-import streamlit as st
-
 st.subheader("Histogram + Normal Curve")
 
-char = st.selectbox("Select Characteristic (Histogram)", df["Characteristic"].unique())
+values = data["Value"].dropna()
 
-data = df[df["Characteristic"] == char]["Value"].dropna()
+if len(values) > 1:
 
-if len(data) > 1:
+    mean = values.mean()
+    std = values.std()
 
-    mean = data.mean()
-    std = data.std()
+    fig2, ax2 = plt.subplots(figsize=(10, 4))
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    ax2.hist(values, bins=20, density=True, alpha=0.6, color="skyblue")
 
-    # =========================
-    # HISTOGRAM
-    # =========================
-    ax.hist(data, bins=20, density=True, alpha=0.6, color="skyblue")
-
-    # =========================
-    # NORMAL CURVE
-    # =========================
-    x = np.linspace(data.min(), data.max(), 100)
+    x = np.linspace(values.min(), values.max(), 100)
     y = norm.pdf(x, mean, std)
 
-    ax.plot(x, y, color="red", linewidth=2, label="Normal curve")
+    ax2.plot(x, y, color="red", linewidth=2, label="Normal curve")
 
-    # =========================
-    # LINES
-    # =========================
-    ax.axvline(mean, color="green", linestyle="--", label="Mean")
+    ax2.axvline(mean, color="green", linestyle="--", label="Mean")
+    ax2.axvline(spec["USL"], color="red", linestyle="--", label="USL")
+    ax2.axvline(spec["LSL"], color="red", linestyle="--", label="LSL")
 
-    spec = stats[stats["Characteristic"] == char].iloc[0]
+    ax2.set_title(f"{char} Distribution")
+    ax2.legend()
+    ax2.grid(True)
 
-    ax.axvline(spec["USL"], color="red", linestyle="--", label="USL")
-    ax.axvline(spec["LSL"], color="red", linestyle="--", label="LSL")
-
-    ax.set_title(f"{char} | Histogram + Normal Curve")
-    ax.legend()
-    ax.grid(True)
-
-    st.pyplot(fig)
+    st.pyplot(fig2)
 
 else:
     st.warning("Not enough data for histogram")
