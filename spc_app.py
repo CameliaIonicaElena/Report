@@ -31,13 +31,12 @@ df_long = df_meas.melt(
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
+df["DATE"] = pd.to_datetime(df["DATE"])
+
 # =========================
-# FILTERS (IMPORTANT FIX)
+# FILTERS
 # =========================
 st.sidebar.header("Filters")
-
-# DATE RANGE
-df["DATE"] = pd.to_datetime(df["DATE"])
 
 min_date = df["DATE"].min()
 max_date = df["DATE"].max()
@@ -56,41 +55,34 @@ df_filtered = df[
 
 # RAW MATERIAL
 materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
+select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
 
-select_all_materials = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
+selected_materials = materials if select_all_m else st.sidebar.multiselect(
+    "RAW MATERIAL", materials
+)
 
-if select_all_materials:
-    selected_materials = materials
-else:
-    selected_materials = st.sidebar.multiselect(
-        "RAW MATERIAL",
-        materials,
-        default=[]
-    )
+if len(selected_materials) > 0:
+    df_filtered = df_filtered[df_filtered["RAW MATERIAL"].isin(selected_materials)]
 
-df_filtered = df_filtered[df_filtered["RAW MATERIAL"].isin(selected_materials)]
+# COLOR
 colors = sorted(df_filtered["COLOR"].dropna().unique())
+select_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
 
-select_all_colors = st.sidebar.checkbox("Select all COLOR", value=True)
+selected_colors = colors if select_all_c else st.sidebar.multiselect(
+    "COLOR", colors
+)
 
-if select_all_colors:
-    selected_colors = colors
-else:
-    selected_colors = st.sidebar.multiselect(
-        "COLOR",
-        colors,
-        default=[]
-    )
+if len(selected_colors) > 0:
+    df_filtered = df_filtered[df_filtered["COLOR"].isin(selected_colors)]
 
-df_filtered = df_filtered[df_filtered["COLOR"].isin(selected_colors)]
 # =========================
-# SPEC LIMITS (IMPORTANT FIX → USE df_filtered)
+# SPEC LIMITS
 # =========================
 df_filtered["USL"] = df_filtered["Target"] + df_filtered["Upper Dev"]
 df_filtered["LSL"] = df_filtered["Target"] + df_filtered["Lower Dev"]
 
 # =========================
-# GROUP STATS
+# STATS
 # =========================
 g = df_filtered.groupby("Characteristic")
 
@@ -101,24 +93,23 @@ stats = pd.DataFrame({
     "USL": g["USL"].first(),
     "LSL": g["LSL"].first(),
     "Xbar": g["Value"].mean(),
-    "Standard deviation": g["Value"].std(),
+    "Std": g["Value"].std(),
     "Max": g["Value"].max(),
     "Min": g["Value"].min(),
-    "Count measured values": g["Value"].count()
+    "Count": g["Value"].count()
 }).reset_index(drop=True)
 
 # =========================
-# DERIVED METRICS
+# METRICS
 # =========================
 stats["Range"] = stats["Max"] - stats["Min"]
-stats["+3s"] = stats["Xbar"] + 3 * stats["Standard deviation"]
-stats["-3s"] = stats["Xbar"] - 3 * stats["Standard deviation"]
+stats["+3s"] = stats["Xbar"] + 3 * stats["Std"]
+stats["-3s"] = stats["Xbar"] - 3 * stats["Std"]
 
-stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Standard deviation"])
-
+stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
 stats["Cpk"] = np.minimum(
-    (stats["USL"] - stats["Xbar"]) / (3 * stats["Standard deviation"]),
-    (stats["Xbar"] - stats["LSL"]) / (3 * stats["Standard deviation"])
+    (stats["USL"] - stats["Xbar"]) / (3 * stats["Std"]),
+    (stats["Xbar"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
 # =========================
@@ -127,8 +118,8 @@ stats["Cpk"] = np.minimum(
 above = df_filtered[df_filtered["Value"] > df_filtered["USL"]].groupby("Characteristic")["Value"].count()
 below = df_filtered[df_filtered["Value"] < df_filtered["LSL"]].groupby("Characteristic")["Value"].count()
 
-stats["Above lower tolerance limit"] = stats["Characteristic"].map(above).fillna(0).astype(int)
-stats["Below lower tolerance limit"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
 # CAPABILITY
@@ -142,154 +133,97 @@ def capability(x):
         return "Capable"
     elif x >= 1.0:
         return "Marginal"
-    else:
-        return "Not capable"
+    return "Not capable"
 
-stats["Process capability"] = stats["Cpk"].apply(capability)
-stats["Bi Process capability"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
+stats["Capability"] = stats["Cpk"].apply(capability)
+stats["OK"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
 
 # =========================
-# FINAL TABLE
+# TABLE
 # =========================
-stats = stats[
-    [
-        "Characteristic",
-        "Upper Dev",
-        "Lower Dev",
-        "USL",
-        "LSL",
-        "Xbar",
-        "Standard deviation",
-        "Max",
-        "Min",
-        "Range",
-        "Above lower tolerance limit",
-        "Below lower tolerance limit",
-        "+3s",
-        "-3s",
-        "Cp",
-        "Cpk",
-        "Process capability",
-        "Bi Process capability",
-        "Count measured values"
-    ]
-]
-
 st.subheader("SPC Summary")
-st.dataframe(stats)
+st.dataframe(stats, use_container_width=True)
 
 # =========================
-# CHARACTERISTIC SELECTOR
+# CHARACTERISTIC
 # =========================
 char = st.selectbox("Select Characteristic", stats["Characteristic"])
 
 data = df_filtered[df_filtered["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 
-# =========================
-# CONTROL CHART
-# =========================
-st.subheader("Control Chart")
-
-fig, ax = plt.subplots(figsize=(10, 4))
-
-ax.plot(data["Value"].values, marker="o", linewidth=1, label="Measurements")
-
-ax.axhline(spec["Xbar"], color="green", label=f"Mean {spec['Xbar']:.3f}")
-ax.axhline(spec["USL"], color="red", label=f"USL {spec['USL']:.3f}")
-ax.axhline(spec["LSL"], color="red", label=f"LSL {spec['LSL']:.3f}")
-
-ax.set_title(f"{char} | Cp={spec['Cp']:.2f} | Cpk={spec['Cpk']:.2f}")
-ax.legend()
-ax.grid(True)
-
-st.pyplot(fig)
-
-# =========================
-# HISTOGRAM + NORMAL CURVE
-# =========================
-st.subheader("Histogram + Normal Curve")
-
 values = data["Value"].dropna()
 
-if len(values) > 1:
+# =========================
+# LAYOUT
+# =========================
+st.subheader("Charts")
 
-    mean = values.mean()
-    std = values.std()
+col1, col2 = st.columns(2)
 
-    fig2, ax2 = plt.subplots(figsize=(10, 4))
+# CONTROL CHART
+with col1:
+    fig, ax = plt.subplots()
 
-    ax2.hist(values, bins=20, density=True, alpha=0.6, color="skyblue")
+    ax.plot(values.values, marker="o", linewidth=1)
+    ax.axhline(spec["Xbar"], color="green")
+    ax.axhline(spec["USL"], color="red")
+    ax.axhline(spec["LSL"], color="red")
 
-    x = np.linspace(values.min(), values.max(), 100)
-    y = norm.pdf(x, mean, std)
+    ax.set_title("Control Chart")
+    ax.grid(True)
 
-    ax2.plot(x, y, color="red", linewidth=2, label="Normal curve")
+    st.pyplot(fig)
 
-    ax2.axvline(mean, color="green", linestyle="--", label="Mean")
-    ax2.axvline(spec["USL"], color="red", linestyle="--", label="USL")
-    ax2.axvline(spec["LSL"], color="red", linestyle="--", label="LSL")
+# HISTOGRAM
+with col2:
+    fig2, ax2 = plt.subplots()
 
-    ax2.set_title(f"{char} Distribution")
-    ax2.legend()
+    ax2.hist(values, bins=20, density=True, alpha=0.6)
+
+    if len(values) > 1:
+        x = np.linspace(values.min(), values.max(), 100)
+        y = norm.pdf(x, values.mean(), values.std())
+        ax2.plot(x, y, color="red")
+
+    ax2.set_title("Histogram")
     ax2.grid(True)
 
     st.pyplot(fig2)
 
-else:
-    st.warning("Not enough data for histogram")
-
-st.subheader("I-MR Control Chart")
-
-values = data["Value"].dropna().reset_index(drop=True)
+# =========================
+# I-MR CHART
+# =========================
+st.subheader("I-MR Chart")
 
 if len(values) > 1:
 
-    # =========================
-    # INDIVIDUALS
-    # =========================
     mean = values.mean()
     mr = values.diff().abs().dropna()
 
-    mr_mean = mr.mean()
-
-    # constants for I-MR
-    d2 = 1.128  # for MR of 2
-
-    sigma = mr_mean / d2
+    sigma = mr.mean() / 1.128
 
     UCL = mean + 3 * sigma
     LCL = mean - 3 * sigma
 
-    # =========================
-    # PLOT
-    # =========================
     fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
 
-    # ---- Individuals chart ----
-    ax[0].plot(values.values, marker="o", linewidth=1)
-    ax[0].axhline(mean, color="green", label="Mean")
-    ax[0].axhline(UCL, color="red", linestyle="--", label="UCL")
-    ax[0].axhline(LCL, color="red", linestyle="--", label="LCL")
+    ax[0].plot(values.values, marker="o")
+    ax[0].axhline(mean, color="green")
+    ax[0].axhline(UCL, color="red", linestyle="--")
+    ax[0].axhline(LCL, color="red", linestyle="--")
+    ax[0].set_title("I Chart")
+    ax[0].grid()
 
-    ax[0].set_title(f"I Chart - {char}")
-    ax[0].legend()
-    ax[0].grid(True)
+    MR_UCL = mr.mean() * 3.267
 
-    # ---- Moving Range chart ----
-    ax[1].plot(mr.values, marker="o", linewidth=1, color="orange")
+    ax[1].plot(mr.values, marker="o", color="orange")
+    ax[1].axhline(mr.mean(), color="green")
+    ax[1].axhline(MR_UCL, color="red", linestyle="--")
+    ax[1].set_title("MR Chart")
+    ax[1].grid()
 
-    MR_UCL = mr_mean * 3.267  # standard constant for MR(2)
-
-    ax[1].axhline(mr_mean, color="green", label="MR Mean")
-    ax[1].axhline(MR_UCL, color="red", linestyle="--", label="UCL")
-
-    ax[1].set_title("Moving Range Chart")
-    ax[1].legend()
-    ax[1].grid(True)
-
-    plt.tight_layout()
     st.pyplot(fig)
 
 else:
-    st.warning("Not enough data for I-MR chart")
+    st.warning("Not enough data")
