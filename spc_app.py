@@ -12,7 +12,7 @@ st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# DATASETS (GitHub / Cloud safe)
+# DATASETS (STREAMLIT SAFE)
 # =========================
 BASE_DIR = os.path.dirname(__file__)
 
@@ -25,8 +25,11 @@ files = {
 selected_dataset = st.sidebar.selectbox("Select dataset", list(files.keys()))
 file = files[selected_dataset]
 
+# =========================
+# FILE CHECK (IMPORTANT)
+# =========================
 if not os.path.exists(file):
-    st.error(f"Missing file: {file}")
+    st.error(f"Missing file in repo: {file}")
     st.stop()
 
 # =========================
@@ -48,21 +51,13 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
-
 df["DATE"] = pd.to_datetime(df["DATE"])
 
 # =========================
-# VALIDATION (IMPORTANT)
+# VALIDATION
 # =========================
-required_cols = ["RAW MATERIAL", "COLOR", "Value", "Characteristic"]
-
-for col in required_cols:
-    if col not in df.columns:
-        st.error(f"Missing column: {col}")
-        st.stop()
-
 if df.empty:
-    st.error("Dataset is empty after merge. Check Specs ↔ Measurements mapping.")
+    st.error("Dataset empty after merge. Check Specs vs Measurements mapping.")
     st.stop()
 
 # =========================
@@ -77,7 +72,7 @@ min_date = df_filtered["DATE"].min()
 max_date = df_filtered["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
-    "DATE range",
+    "Date range",
     value=(min_date, max_date),
     min_value=min_date,
     max_value=max_date
@@ -88,9 +83,7 @@ df_filtered = df_filtered[
     (df_filtered["DATE"] <= pd.to_datetime(end_date))
 ]
 
-# =========================
-# RAW MATERIAL FILTER
-# =========================
+# RAW MATERIAL
 materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
 select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
 
@@ -101,9 +94,7 @@ selected_materials = materials if select_all_m else st.sidebar.multiselect(
 if selected_materials:
     df_filtered = df_filtered[df_filtered["RAW MATERIAL"].isin(selected_materials)]
 
-# =========================
-# COLOR FILTER
-# =========================
+# COLOR
 colors = sorted(df_filtered["COLOR"].dropna().unique())
 select_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
 
@@ -139,7 +130,7 @@ stats = pd.DataFrame({
 }).reset_index(drop=True)
 
 # =========================
-# DERIVED METRICS
+# METRICS
 # =========================
 stats["Range"] = stats["Max"] - stats["Min"]
 stats["+3s"] = stats["Xbar"] + 3 * stats["Std"]
@@ -196,7 +187,7 @@ st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(highlight, axis=None), use_container_width=True)
 
 # =========================
-# CHARACTERISTIC
+# CHARACTERISTIC SELECTOR
 # =========================
 char = st.selectbox("Select Characteristic", stats["Characteristic"])
 
@@ -206,7 +197,7 @@ spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# LAYOUT (WIDE)
+# CHART LAYOUT (WIDE)
 # =========================
 st.subheader("Charts")
 
@@ -275,4 +266,4 @@ if len(values) > 1:
     st.pyplot(fig)
 
 else:
-    st.warning("Not enough data for I-MR")
+    st.warning("Not enough data for I-MR chart")
