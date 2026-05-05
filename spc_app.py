@@ -30,7 +30,31 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
+st.sidebar.header("Filters")
 
+# =========================
+# DATE FILTER
+# =========================
+dates = df["DATE"].dropna().unique()
+selected_date = st.sidebar.selectbox("DATE", sorted(dates))
+
+df_filtered = df[df["DATE"] == selected_date]
+
+# =========================
+# RAW MATERIAL FILTER
+# =========================
+materials = df_filtered["RAW MATERIAL"].dropna().unique()
+selected_material = st.sidebar.selectbox("RAW MATERIAL", sorted(materials))
+
+df_filtered = df_filtered[df_filtered["RAW MATERIAL"] == selected_material]
+
+# =========================
+# COLOR FILTER
+# =========================
+colors = df_filtered["COLOR"].dropna().unique()
+selected_color = st.sidebar.selectbox("COLOR", sorted(colors))
+
+df_filtered = df_filtered[df_filtered["COLOR"] == selected_color]
 # =========================
 # SPEC LIMITS
 # =========================
