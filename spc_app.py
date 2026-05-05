@@ -6,34 +6,27 @@ from scipy.stats import norm
 import os
 
 # =========================
-# CONFIG
+# CONFIG (MUST BE FIRST)
 # =========================
 st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# DATA FILES (SAFE PATHS)
+# DATASETS (GitHub / Cloud safe)
 # =========================
 BASE_DIR = os.path.dirname(__file__)
- 
+
 files = {
     "Dataset Original": os.path.join(BASE_DIR, "Test-Measurements&Specs.xlsx"),
     "Dataset Test1": os.path.join(BASE_DIR, "Test-Measurements&Specs1.xlsx"),
     "Dataset Test2": os.path.join(BASE_DIR, "Test-Measurements&Specs2.xlsx")
 }
 
-selected_dataset = st.sidebar.selectbox(
-    "Select dataset",
-    list(files.keys())
-)
-
+selected_dataset = st.sidebar.selectbox("Select dataset", list(files.keys()))
 file = files[selected_dataset]
 
-# =========================
-# CHECK FILE EXISTS (🔥 IMPORTANT)
-# =========================
 if not os.path.exists(file):
-    st.error(f"File not found: {file}")
+    st.error(f"Missing file: {file}")
     st.stop()
 
 # =========================
@@ -55,8 +48,49 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
+
 df["DATE"] = pd.to_datetime(df["DATE"])
-# RAW MATERIAL
+
+# =========================
+# VALIDATION (IMPORTANT)
+# =========================
+required_cols = ["RAW MATERIAL", "COLOR", "Value", "Characteristic"]
+
+for col in required_cols:
+    if col not in df.columns:
+        st.error(f"Missing column: {col}")
+        st.stop()
+
+if df.empty:
+    st.error("Dataset is empty after merge. Check Specs ↔ Measurements mapping.")
+    st.stop()
+
+# =========================
+# FILTERS
+# =========================
+st.sidebar.header("Filters")
+
+df_filtered = df.copy()
+
+# DATE RANGE
+min_date = df_filtered["DATE"].min()
+max_date = df_filtered["DATE"].max()
+
+start_date, end_date = st.sidebar.date_input(
+    "DATE range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+df_filtered = df_filtered[
+    (df_filtered["DATE"] >= pd.to_datetime(start_date)) &
+    (df_filtered["DATE"] <= pd.to_datetime(end_date))
+]
+
+# =========================
+# RAW MATERIAL FILTER
+# =========================
 materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
 select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
 
@@ -64,10 +98,12 @@ selected_materials = materials if select_all_m else st.sidebar.multiselect(
     "RAW MATERIAL", materials
 )
 
-if len(selected_materials) > 0:
+if selected_materials:
     df_filtered = df_filtered[df_filtered["RAW MATERIAL"].isin(selected_materials)]
 
-# COLOR
+# =========================
+# COLOR FILTER
+# =========================
 colors = sorted(df_filtered["COLOR"].dropna().unique())
 select_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
 
@@ -75,7 +111,7 @@ selected_colors = colors if select_all_c else st.sidebar.multiselect(
     "COLOR", colors
 )
 
-if len(selected_colors) > 0:
+if selected_colors:
     df_filtered = df_filtered[df_filtered["COLOR"].isin(selected_colors)]
 
 # =========================
@@ -103,13 +139,14 @@ stats = pd.DataFrame({
 }).reset_index(drop=True)
 
 # =========================
-# METRICS
+# DERIVED METRICS
 # =========================
 stats["Range"] = stats["Max"] - stats["Min"]
 stats["+3s"] = stats["Xbar"] + 3 * stats["Std"]
 stats["-3s"] = stats["Xbar"] - 3 * stats["Std"]
 
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
+
 stats["Cpk"] = np.minimum(
     (stats["USL"] - stats["Xbar"]) / (3 * stats["Std"]),
     (stats["Xbar"] - stats["LSL"]) / (3 * stats["Std"])
@@ -142,21 +179,21 @@ stats["Capability"] = stats["Cpk"].apply(capability)
 stats["OK"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
 
 # =========================
-# TABLE STYLE (🔥 FIX REQUESTED)
+# STYLE (RED + BOLD OOS)
 # =========================
-def highlight_oos(df):
+def highlight(df):
     style = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    style.loc[df["Above OOS"] > 0, "Above OOS"] = "color: red; font-weight: bold"
-    style.loc[df["Below OOS"] > 0, "Below OOS"] = "color: red; font-weight: bold"
+    style.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red; font-weight:bold"
+    style.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red; font-weight:bold"
 
     return style
 
+# =========================
+# TABLE
+# =========================
 st.subheader("SPC Summary")
-st.dataframe(
-    stats.style.apply(highlight_oos, axis=None),
-    use_container_width=True
-)
+st.dataframe(stats.style.apply(highlight, axis=None), use_container_width=True)
 
 # =========================
 # CHARACTERISTIC
@@ -169,7 +206,7 @@ spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# LAYOUT
+# LAYOUT (WIDE)
 # =========================
 st.subheader("Charts")
 
@@ -177,7 +214,7 @@ col1, col2 = st.columns(2)
 
 # CONTROL CHART
 with col1:
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(6, 4))
 
     ax.plot(values.values, marker="o", linewidth=1)
     ax.axhline(spec["Xbar"], color="green")
@@ -185,13 +222,13 @@ with col1:
     ax.axhline(spec["LSL"], color="red")
 
     ax.set_title("Control Chart")
-    ax.grid(True)
+    ax.grid()
 
     st.pyplot(fig)
 
 # HISTOGRAM
 with col2:
-    fig2, ax2 = plt.subplots()
+    fig2, ax2 = plt.subplots(figsize=(6, 4))
 
     ax2.hist(values, bins=20, density=True, alpha=0.6)
 
@@ -201,7 +238,7 @@ with col2:
         ax2.plot(x, y, color="red")
 
     ax2.set_title("Histogram")
-    ax2.grid(True)
+    ax2.grid()
 
     st.pyplot(fig2)
 
@@ -220,13 +257,12 @@ if len(values) > 1:
     UCL = mean + 3 * sigma
     LCL = mean - 3 * sigma
 
-    fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    fig, ax = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
 
     ax[0].plot(values.values, marker="o")
     ax[0].axhline(mean, color="green")
     ax[0].axhline(UCL, color="red", linestyle="--")
     ax[0].axhline(LCL, color="red", linestyle="--")
-    ax[0].set_title("I Chart")
     ax[0].grid()
 
     MR_UCL = mr.mean() * 3.267
@@ -234,10 +270,9 @@ if len(values) > 1:
     ax[1].plot(mr.values, marker="o", color="orange")
     ax[1].axhline(mr.mean(), color="green")
     ax[1].axhline(MR_UCL, color="red", linestyle="--")
-    ax[1].set_title("MR Chart")
     ax[1].grid()
 
     st.pyplot(fig)
 
 else:
-    st.warning("Not enough data")
+    st.warning("Not enough data for I-MR")
