@@ -17,7 +17,16 @@ st.title("SPC Dashboard")
 # =========================
 # LOAD DATA
 # =========================
-file = "Test-Measurements&Specs.xlsx"
+files = {
+    "Dataset 0": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx"
+}
+selected_dataset = st.sidebar.selectbox(
+    "Select dataset",
+    list(files.keys())
+) 
+file = files[selected_dataset]
 
 df_meas = pd.read_excel(file, sheet_name="Measurements")
 df_specs = pd.read_excel(file, sheet_name="Specs")
