@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm
-import os
 
 # =========================
 # CONFIG (MUST BE FIRST)
@@ -12,47 +11,34 @@ st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# BASE PATH (ONE DRIVE LOCAL)
+# LOAD DATA (NO CACHE → LIVE REFRESH)
 # =========================
-BASE_PATH = r"C:\Users\RO10471\OneDrive - SIG\GQM spouts - Documents\Measurements-test files"
-
-# =========================
-# DATASETS
-# =========================
-files = {
-    "Dataset Original": "Test-Measurements&Specs.xlsx",
-    "Dataset Test1": "Test-Measurements&Specs1.xlsx",
-    "Dataset Test2": "Test-Measurements&Specs2.xlsx"
-}
-
-selected_dataset = st.sidebar.selectbox("Select dataset", list(files.keys()))
-file_path = os.path.join(BASE_PATH, files[selected_dataset])
-
-# =========================
-# FILE CHECK
-# =========================
-if not os.path.exists(file_path):
-    st.error(f"File not found:\n{file_path}")
-    st.stop()
-
-# =========================
-# LOAD DATA
-# =========================
-@st.cache_data(ttl=86400)
-def load_data(path):
-    df_meas = pd.read_excel(path, sheet_name="Measurements")
-    df_specs = pd.read_excel(path, sheet_name="Specs")
+def load_data(file):
+    df_meas = pd.read_excel(file, sheet_name="Measurements")
+    df_specs = pd.read_excel(file, sheet_name="Specs")
 
     df_meas.columns = df_meas.columns.str.strip()
     df_specs.columns = df_specs.columns.str.strip()
 
     return df_meas, df_specs
 
+
+files = {
+    "Dataset 0": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx"
+}
+
+selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
+file_path = files[selected]
+
 df_meas, df_specs = load_data(file_path)
 
 # =========================
 # TRANSFORM
 # =========================
+df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
+
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
@@ -60,59 +46,57 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
-df["DATE"] = pd.to_datetime(df["DATE"])
 
 # =========================
 # FILTERS
 # =========================
 st.sidebar.header("Filters")
 
-df_filtered = df.copy()
-
 # DATE RANGE
-min_date = df_filtered["DATE"].min()
-max_date = df_filtered["DATE"].max()
+min_d = df["DATE"].min()
+max_d = df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
     "Date range",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date
+    value=(min_d, max_d),
+    min_value=min_d,
+    max_value=max_d
 )
 
-df_filtered = df_filtered[
-    (df_filtered["DATE"] >= pd.to_datetime(start_date)) &
-    (df_filtered["DATE"] <= pd.to_datetime(end_date))
-]
+df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
 
 # RAW MATERIAL
-materials = sorted(df_filtered["RAW MATERIAL"].dropna().unique())
-if st.sidebar.checkbox("Select all RAW MATERIAL", True):
-    selected_materials = materials
-else:
-    selected_materials = st.sidebar.multiselect("RAW MATERIAL", materials)
+materials = sorted(df["RAW MATERIAL"].dropna().unique())
+select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
 
-df_filtered = df_filtered[df_filtered["RAW MATERIAL"].isin(selected_materials)]
+selected_m = materials if select_all_m else st.sidebar.multiselect(
+    "RAW MATERIAL", materials
+)
+
+if selected_m:
+    df = df[df["RAW MATERIAL"].isin(selected_m)]
 
 # COLOR
-colors = sorted(df_filtered["COLOR"].dropna().unique())
-if st.sidebar.checkbox("Select all COLOR", True):
-    selected_colors = colors
-else:
-    selected_colors = st.sidebar.multiselect("COLOR", colors)
+colors = sorted(df["COLOR"].dropna().unique())
+select_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
 
-df_filtered = df_filtered[df_filtered["COLOR"].isin(selected_colors)]
+selected_c = colors if select_all_c else st.sidebar.multiselect(
+    "COLOR", colors
+)
+
+if selected_c:
+    df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
 # SPEC LIMITS
 # =========================
-df_filtered["USL"] = df_filtered["Target"] + df_filtered["Upper Dev"]
-df_filtered["LSL"] = df_filtered["Target"] + df_filtered["Lower Dev"]
+df["USL"] = df["Target"] + df["Upper Dev"]
+df["LSL"] = df["Target"] + df["Lower Dev"]
 
 # =========================
 # STATS
 # =========================
-g = df_filtered.groupby("Characteristic")
+g = df.groupby("Characteristic")
 
 stats = pd.DataFrame({
     "Characteristic": g["Characteristic"].first(),
@@ -143,8 +127,8 @@ stats["Cpk"] = np.minimum(
 # =========================
 # OOS
 # =========================
-above = df_filtered[df_filtered["Value"] > df_filtered["USL"]].groupby("Characteristic")["Value"].count()
-below = df_filtered[df_filtered["Value"] < df_filtered["LSL"]].groupby("Characteristic")["Value"].count()
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 
 stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
@@ -152,46 +136,43 @@ stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 # =========================
 # CAPABILITY
 # =========================
-def capability(x):
+def cap(x):
     if pd.isna(x):
         return "No data"
-    elif x >= 1.67:
+    if x >= 1.67:
         return "Excellent"
-    elif x >= 1.33:
+    if x >= 1.33:
         return "Capable"
-    elif x >= 1.0:
+    if x >= 1.0:
         return "Marginal"
     return "Not capable"
 
-stats["Capability"] = stats["Cpk"].apply(capability)
+stats["Capability"] = stats["Cpk"].apply(cap)
 stats["OK"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
 
 # =========================
 # STYLE (RED + BOLD OOS)
 # =========================
-def highlight(df):
-    style = pd.DataFrame("", index=df.index, columns=df.columns)
-    style.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
-    style.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
-    return style
+def style(df):
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+    return s
 
-# =========================
-# TABLE
-# =========================
 st.subheader("SPC Summary")
-st.dataframe(stats.style.apply(highlight, axis=None), use_container_width=True)
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# CHARACTERISTIC
+# SELECT CHARACTERISTIC
 # =========================
-char = st.selectbox("Select Characteristic", stats["Characteristic"])
+char = st.selectbox("Characteristic", stats["Characteristic"])
 
-data = df_filtered[df_filtered["Characteristic"] == char]
+data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# CHART LAYOUT 2x2 WIDE
+# LAYOUT (2 COLUMNS WIDE)
 # =========================
 st.subheader("Charts")
 
@@ -199,18 +180,22 @@ col1, col2 = st.columns(2)
 
 # CONTROL CHART
 with col1:
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(6, 4))
+
     ax.plot(values.values, marker="o")
     ax.axhline(spec["Xbar"], color="green")
     ax.axhline(spec["USL"], color="red")
     ax.axhline(spec["LSL"], color="red")
+
     ax.set_title("Control Chart")
     ax.grid()
+
     st.pyplot(fig)
 
 # HISTOGRAM
 with col2:
-    fig2, ax2 = plt.subplots()
+    fig2, ax2 = plt.subplots(figsize=(6, 4))
+
     ax2.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
@@ -220,6 +205,7 @@ with col2:
 
     ax2.set_title("Histogram")
     ax2.grid()
+
     st.pyplot(fig2)
 
 # =========================
@@ -237,7 +223,7 @@ if len(values) > 1:
     UCL = mean + 3 * sigma
     LCL = mean - 3 * sigma
 
-    fig, ax = plt.subplots(2, 1, figsize=(14, 5), sharex=True)
+    fig, ax = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
 
     ax[0].plot(values.values, marker="o")
     ax[0].axhline(mean, color="green")
@@ -255,4 +241,4 @@ if len(values) > 1:
     st.pyplot(fig)
 
 else:
-    st.warning("Not enough data for I-MR chart")
+    st.warning("Not enough data")
