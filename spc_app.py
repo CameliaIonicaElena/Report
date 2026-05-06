@@ -124,7 +124,7 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# CAPABILITY
+# CAPABILITY TEXT
 # =========================
 def cap(x):
     if pd.isna(x):
@@ -140,7 +140,7 @@ def cap(x):
 stats["Capability"] = stats["Cpk"].apply(cap)
 
 # =========================
-# STYLE TABLE
+# STYLE
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -148,11 +148,14 @@ def style(df):
     s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
     return s
 
-st.subheader("Summary Table")
+# =========================
+# TABLE
+# =========================
+st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# CHARACTERISTIC
+# SELECT CHARACTERISTIC
 # =========================
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
@@ -161,7 +164,7 @@ vals = data["Value"].dropna()
 row = stats[stats["Characteristic"] == char].iloc[0]
 
 # =========================
-# SUMMARY (FIXED POSITION)
+# SUMMARY (UNDER SELECTBOX)
 # =========================
 st.subheader("Summary")
 
@@ -182,17 +185,17 @@ st.dataframe(
 )
 
 # =========================
-# CHARTS LAYOUT
+# ROW 1: CONTROL + HISTOGRAM
 # =========================
-st.subheader("Analysis")
+st.subheader("Distribution Analysis")
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 
 # CONTROL CHART
 with col1:
     st.markdown("### Control Chart")
     fig, ax = plt.subplots()
-    ax.plot(vals.values, marker="o", linewidth=1)
+    ax.plot(vals.values, marker="o")
     ax.axhline(row["Mean"], color="green")
     ax.axhline(row["USL"], color="red")
     ax.axhline(row["LSL"], color="red")
@@ -201,8 +204,7 @@ with col1:
 
 # HISTOGRAM
 with col2:
-    st.markdown("### Histogram + Normal")
-
+    st.markdown("### Histogram + Normal Curve")
     fig, ax = plt.subplots()
     ax.hist(vals, bins=20, density=True, alpha=0.6)
 
@@ -214,10 +216,16 @@ with col2:
     ax.grid()
     st.pyplot(fig)
 
+# =========================
+# ROW 2: MOVING RANGE + CAPABILITY
+# =========================
+st.subheader("Process Stability & Capability")
+
+col3, col4 = st.columns(2)
+
 # MOVING RANGE
 with col3:
     st.markdown("### Moving Range")
-
     mr = vals.diff().abs().dropna()
 
     fig, ax = plt.subplots()
@@ -230,15 +238,17 @@ with col3:
     ax.grid()
     st.pyplot(fig)
 
-# =========================
-# CAPABILITY CHART
-# =========================
-st.subheader("Capability (Cp / Cpk)")
+# CAPABILITY
+with col4:
+    st.markdown("### Capability (Cp / Cpk)")
 
-fig, ax = plt.subplots()
-ax.bar(["Cp", "Cpk"], [row["Cp"], row["Cpk"]])
-ax.axhline(1.33, color="red", linestyle="--")
-ax.axhline(1.0, color="orange", linestyle="--")
-ax.set_ylim(0, max(2, row["Cp"], row["Cpk"]))
-ax.grid()
-st.pyplot(fig)
+    fig, ax = plt.subplots()
+    ax.bar(["Cp", "Cpk"], [row["Cp"], row["Cpk"]])
+
+    ax.axhline(1.33, color="red", linestyle="--")
+    ax.axhline(1.0, color="orange", linestyle="--")
+
+    ax.set_ylim(0, max(2, row["Cp"], row["Cpk"]))
+    ax.grid()
+
+    st.pyplot(fig)
