@@ -25,9 +25,9 @@ def load_data(file):
 
 
 files = {
-    "Dataset 0": "Test-Measurements&Specs.xlsx",
-    "Dataset 1": "Test-Measurements&Specs1.xlsx",
-    "Dataset 2": "Test-Measurements&Specs2.xlsx"
+    "Dataset Original": "Test-Measurements&Specs.xlsx",
+    "Dataset Test1": "Test-Measurements&Specs1.xlsx",
+    "Dataset Test2": "Test-Measurements&Specs2.xlsx"
 }
 
 selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
