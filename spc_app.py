@@ -9,12 +9,6 @@ from scipy.stats import norm
 # =========================
 st.set_page_config(layout="wide")
 
-# SIG-like palette (soft industrial)
-COLOR_PRIMARY = "#1f4e79"
-COLOR_RED = "#c00000"
-COLOR_GREEN = "#2e7d32"
-COLOR_GREY = "#666666"
-
 st.title("SPC Dashboard")
 
 # =========================
@@ -27,10 +21,8 @@ files = {
 }
 
 selected_file = st.sidebar.selectbox("Select dataset", list(files.keys()))
-file_path = files[selected_file]
-
-df_meas = pd.read_excel(file_path, sheet_name="Measurements")
-df_specs = pd.read_excel(file_path, sheet_name="Specs")
+df_meas = pd.read_excel(files[selected_file], sheet_name="Measurements")
+df_specs = pd.read_excel(files[selected_file], sheet_name="Specs")
 
 df_meas.columns = df_meas.columns.str.strip()
 df_specs.columns = df_specs.columns.str.strip()
@@ -68,24 +60,18 @@ df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-mat_all = st.sidebar.checkbox("Select all RAW MATERIAL", True)
-col_all = st.sidebar.checkbox("Select all COLOR", True)
+df = df[df["RAW MATERIAL"].isin(
+    materials if st.sidebar.checkbox("All materials", True)
+    else st.sidebar.multiselect("RAW MATERIAL", materials)
+)]
 
-if mat_all:
-    mat_sel = materials
-else:
-    mat_sel = st.sidebar.multiselect("RAW MATERIAL", materials)
-
-if col_all:
-    col_sel = colors
-else:
-    col_sel = st.sidebar.multiselect("COLOR", colors)
-
-df = df[df["RAW MATERIAL"].isin(mat_sel)]
-df = df[df["COLOR"].isin(col_sel)]
+df = df[df["COLOR"].isin(
+    colors if st.sidebar.checkbox("All colors", True)
+    else st.sidebar.multiselect("COLOR", colors)
+)]
 
 # =========================
-# SPEC LIMITS
+# LIMITS
 # =========================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
@@ -123,41 +109,29 @@ stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 # =========================
 # STYLE TABLE
 # =========================
-def style_oos(df):
-    style = pd.DataFrame("", index=df.index, columns=df.columns)
+def style(df):
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold;text-decoration:underline"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold;text-decoration:underline"
+    return s
 
-    for col in ["Above OOS", "Below OOS"]:
-        style.loc[df[col] > 0, col] = (
-            "color:red; font-weight:bold; text-decoration: underline"
-        )
-
-    return style
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# OVERVIEW TITLE
+# SELECTION
 # =========================
-st.markdown("## Characteristic Analysis")
+st.markdown("## Measurement point")
 
-st.dataframe(
-    stats.style.apply(style_oos, axis=None),
-    use_container_width=True
-)
-
-# =========================
-# SELECT CHARACTERISTIC
-# =========================
-st.markdown("### Measurement point")
-
-char = st.selectbox("Select Measurement point", stats["Characteristic"])
+char = st.selectbox("Select measurement point", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# CHARACTERISTIC ANALYSIS CHARTS
+# CHARACTERISTIC ANALYSIS
 # =========================
-st.markdown("## Characteristic Analysis")
+st.markdown("## Characteristic analysis")
 
 c1, c2 = st.columns(2)
 
@@ -165,36 +139,36 @@ c1, c2 = st.columns(2)
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(values.values, marker="o", linewidth=1, color=COLOR_PRIMARY)
-    ax.axhline(spec["Mean"], color=COLOR_GREEN)
-    ax.axhline(spec["USL"], color=COLOR_RED)
-    ax.axhline(spec["LSL"], color=COLOR_RED)
+    ax.plot(values.values, marker="o", linewidth=1)
+    ax.axhline(spec["Mean"], color="green")
+    ax.axhline(spec["USL"], color="red")
+    ax.axhline(spec["LSL"], color="red")
 
     ax.set_title("Control Chart")
     ax.grid()
 
     st.pyplot(fig)
-    st.caption(f"Mean={spec['Mean']:.2f} | USL={spec['USL']:.2f} | LSL={spec['LSL']:.2f}")
+    st.caption("Mean / USL / LSL reference lines")
 
 # HISTOGRAM
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.hist(values, bins=20, density=True, alpha=0.6, color="#8aa6c1")
+    ax.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
         y = norm.pdf(x, values.mean(), values.std())
-        ax.plot(x, y, color=COLOR_PRIMARY)
+        ax.plot(x, y)
 
-    ax.set_title("Histogram + Normal Curve")
+    ax.set_title("Distribution")
     ax.grid()
 
     st.pyplot(fig)
-    st.caption("Distribution + fitted normal curve")
+    st.caption("Histogram + normal approximation")
 
 # =========================
-# SECOND ROW (I-MR + CAPABILITY)
+# SECOND ROW
 # =========================
 c3, c4 = st.columns(2)
 
@@ -211,72 +185,68 @@ with c3:
 
         fig, ax = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
 
-        ax[0].plot(values.values, color=COLOR_PRIMARY)
-        ax[0].axhline(mean, color=COLOR_GREEN)
-        ax[0].axhline(UCL, color=COLOR_RED, linestyle="--")
-        ax[0].axhline(LCL, color=COLOR_RED, linestyle="--")
+        ax[0].plot(values.values)
+        ax[0].axhline(mean, color="green")
+        ax[0].axhline(UCL, color="red", linestyle="--")
+        ax[0].axhline(LCL, color="red", linestyle="--")
         ax[0].set_title("I Chart")
         ax[0].grid()
 
         ax[1].plot(mr.values, color="orange")
-        ax[1].axhline(mr.mean(), color=COLOR_GREEN)
-        ax[1].axhline(mr.mean()*3.267, color=COLOR_RED, linestyle="--")
+        ax[1].axhline(mr.mean(), color="green")
+        ax[1].axhline(mr.mean()*3.267, color="red", linestyle="--")
         ax[1].set_title("Moving Range")
         ax[1].grid()
 
-        plt.tight_layout()
         st.pyplot(fig)
-
-        st.caption("I-MR control logic (variation monitoring)")
+        st.caption("Process variation monitoring")
 
 # CAPABILITY
 with c4:
     fig, ax = plt.subplots()
 
-    ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]], color=[COLOR_PRIMARY, COLOR_GREEN])
-    ax.axhline(1.33, color=COLOR_RED, linestyle="--")
+    ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]])
+    ax.axhline(1.33, color="red", linestyle="--")
 
     ax.set_title("Capability")
     ax.grid()
 
     st.pyplot(fig)
-
-    st.caption(f"Cp={spec['Cp']:.2f} | Cpk={spec['Cpk']:.2f}")
+    st.caption("Process capability indices")
 
 # =========================
 # GLOBAL OVERVIEW
 # =========================
-st.markdown("## General overview for Selected Closure")
+st.markdown("## General overview for selected closure")
 
 c5, c6 = st.columns(2)
 
-# BOXPLOT
+# BOXPLOT (FIXED CLEAN)
 with c5:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    df.boxplot(column="Value", by="Characteristic", ax=ax)
+    df.boxplot(column="Value", by="Characteristic", ax=ax, grid=False)
+    ax.set_title("")
+    ax.set_xlabel("")
+    ax.set_ylabel("Value")
     plt.xticks(rotation=90)
-    ax.set_title("Boxplot per Characteristic")
-    ax.grid()
 
     st.pyplot(fig)
+    st.caption("Distribution per characteristic")
 
-    st.caption("Distribution spread per characteristic")
-
-# PARETO OOS
+# PARETO
 with c6:
     pareto = stats.copy()
-    pareto["Total OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
-    pareto = pareto.sort_values("Total OOS", ascending=False)
+    pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
+    pareto = pareto.sort_values("OOS", ascending=False)
 
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.bar(pareto["Characteristic"], pareto["Total OOS"], color=COLOR_PRIMARY)
+    ax.bar(pareto["Characteristic"], pareto["OOS"])
     plt.xticks(rotation=90)
 
-    ax.set_title("Pareto OOS")
+    ax.set_title("")
     ax.grid()
 
     st.pyplot(fig)
-
-    st.caption("Defect prioritization (80/20 principle)")
+    st.caption("OOS prioritization (Pareto principle)")
