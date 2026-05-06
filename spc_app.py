@@ -63,7 +63,17 @@ start_date, end_date = st.sidebar.date_input(
     max_value=max_d
 )
 
-df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
+df["DATE"] = pd.to_datetime(df["DATE"])
+
+start_date, end_date = st.sidebar.date_input(
+    "Date range",
+    value=(df["DATE"].min().date(), df["DATE"].max().date())
+)
+
+start_date = pd.to_datetime(start_date)
+end_date = pd.to_datetime(end_date)
+
+df = df[df["DATE"].between(start_date, end_date)]
 
 # RAW MATERIAL
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
