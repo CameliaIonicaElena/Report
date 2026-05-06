@@ -8,6 +8,7 @@ import os
 # =========================
 # CONFIG
 # =========================
+
 st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
