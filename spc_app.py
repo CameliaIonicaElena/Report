@@ -1,30 +1,24 @@
-import streamlit as st
+import requests
+from io import BytesIO
 import pandas as pd
+import streamlit as st
 
-st.set_page_config(page_title="SPC Dashboard", layout="wide")
-
-# ==============================
-# 🔗 SHAREPOINT FILES (LIVE)
-# ==============================
-files = {
-    "Test 1": "https://sigitglobal.sharepoint.com/sites/GQMSpouts131/Shared%20Documents/Measurements-test%20files/Test-Measurements%26Specs.xlsx?download=1",
-    "Test 2": "https://sigitglobal.sharepoint.com/sites/GQMSpouts131/Shared%20Documents/Measurements-test%20files/Test-Measurements%26Specs1.xlsx?download=1",
-    "Test 3": "https://sigitglobal.sharepoint.com/sites/GQMSpouts131/Shared%20Documents/Measurements-test%20files/Test-Measurements%26Specs2.xlsx?download=1"
-}
-
-# ==============================
-# 🔄 LOAD DATA
-# ==============================
 @st.cache_data(ttl=600)
-def load_data(file):
-    df_meas = pd.read_excel(file, sheet_name="Measurements")
-    df_specs = pd.read_excel(file, sheet_name="Specs")
+def load_data(url):
+    response = requests.get(url)
+    
+    if response.status_code != 200:
+        raise Exception("Failed to load file from SharePoint")
+
+    xls = pd.ExcelFile(BytesIO(response.content))
+
+    df_meas = xls.parse("Measurements")
+    df_specs = xls.parse("Specs")
 
     df_meas.columns = df_meas.columns.str.strip()
     df_specs.columns = df_specs.columns.str.strip()
 
     return df_meas, df_specs
-
 # ==============================
 # 🎯 SELECT FILE
 # ==============================
