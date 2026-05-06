@@ -50,9 +50,7 @@ min_d, max_d = df["DATE"].min(), df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
     "Date range",
-    value=(min_d, max_d),
-    min_value=min_d,
-    max_value=max_d
+    value=(min_d, max_d)
 )
 
 df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
@@ -61,18 +59,10 @@ df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-if st.sidebar.checkbox("Select all RAW MATERIAL", True):
-    selected_m = materials
-else:
-    selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
+selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
+selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
 
 df = df[df["RAW MATERIAL"].isin(selected_m)]
-
-if st.sidebar.checkbox("Select all COLOR", True):
-    selected_c = colors
-else:
-    selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
-
 df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
@@ -125,139 +115,115 @@ st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 # MEASUREMENT POINT
 # =========================
 st.markdown("## Measurement point")
-
-char = st.selectbox("Select measurement point", stats["Characteristic"])
+char = st.selectbox("Select one Measurement point", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# CHARACTERISTIC ANALYSIS
+# ROW 1
 # =========================
-st.markdown("## Characteristic analysis")
-
 c1, c2 = st.columns(2)
 
+# CONTROL CHART
 with c1:
-    fig, ax = plt.subplots(figsize=(6, 4))
-
+    fig, ax = plt.subplots(figsize=(6,4))
     ax.plot(values.values, marker="o")
-    ax.axhline(spec["Mean"], color="green")
-    ax.axhline(spec["USL"], color="red")
-    ax.axhline(spec["LSL"], color="red")
-
+    ax.axhline(spec["Mean"])
+    ax.axhline(spec["USL"], linestyle="--")
+    ax.axhline(spec["LSL"], linestyle="--")
     ax.set_title("Control Chart")
     ax.grid()
-
     st.pyplot(fig)
-    st.markdown("Legend: Mean / USL / LSL / Measurements")
+    st.markdown("Legend: Measurements | Mean | USL | LSL")
 
+# HISTOGRAM
 with c2:
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    ax.hist(values, bins=20, density=True, alpha=0.6)
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.hist(values, bins=20, density=True, alpha=0.7)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        y = norm.pdf(x, values.mean(), values.std())
-        ax.plot(x, y)
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
     ax.set_title("Histogram + Normal Curve")
     ax.grid()
-
     st.pyplot(fig)
-    st.markdown("Legend: Distribution + Normal fit")
+    st.markdown("Legend: Distribution | Normal curve")
 
 # =========================
-# SECOND ROW
+# ROW 2
 # =========================
 c3, c4 = st.columns(2)
 
+# I-MR
 with c3:
     if len(values) > 1:
-        mean = values.mean()
         mr = values.diff().abs().dropna()
-        sigma = mr.mean() / 1.128
 
-        UCL = mean + 3 * sigma
-        LCL = mean - 3 * sigma
-
-        fig, ax = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
+        fig, ax = plt.subplots(2,1, figsize=(6,4), sharex=True)
 
         ax[0].plot(values.values)
-        ax[0].axhline(mean, color="green")
-        ax[0].axhline(UCL, color="red", linestyle="--")
-        ax[0].axhline(LCL, color="red", linestyle="--")
         ax[0].set_title("I Chart")
         ax[0].grid()
 
-        ax[1].plot(mr.values, color="orange")
-        ax[1].axhline(mr.mean(), color="green")
-        ax[1].axhline(mr.mean()*3.267, color="red", linestyle="--")
+        ax[1].plot(mr.values)
         ax[1].set_title("Moving Range")
         ax[1].grid()
 
         st.pyplot(fig)
-        st.markdown("Legend: variation + control limits")
+        st.markdown("Legend: Individual values | Moving variation")
 
+# CAPABILITY
 with c4:
     fig, ax = plt.subplots()
-
     ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]])
-    ax.axhline(1.33, color="red", linestyle="--")
-
-    ax.set_title("Capability")
+    ax.axhline(1.33, linestyle="--")
+    ax.set_title("Capability (Cp / Cpk)")
     ax.grid()
-
     st.pyplot(fig)
-    st.markdown(f"Legend: Cp={spec['Cp']:.2f}, Cpk={spec['Cpk']:.2f}")
+    st.markdown(f"Legend: Cp={spec['Cp']:.2f} | Cpk={spec['Cpk']:.2f}")
 
 # =========================
-# GLOBAL OVERVIEW
+# GLOBAL SECTION
 # =========================
 st.markdown("## General overview for selected closure")
 
 c5, c6 = st.columns(2)
 
-# BOX PLOT
+# BOXPLOT
 with c5:
-    fig, ax = plt.subplots(figsize=(6, 4))
-
+    fig, ax = plt.subplots(figsize=(8,4))
     df.boxplot(column="Value", by="Characteristic", ax=ax, grid=False)
-
-    ax.set_title("")
-    ax.set_xlabel("")
-    ax.set_ylabel("Value")
-    plt.xticks(rotation=90)
-
+    plt.xticks(rotation=45, ha="right")
+    ax.set_title("Boxplot per Characteristic")
+    plt.suptitle("")
     st.pyplot(fig)
-    st.markdown("Legend: distribution per characteristic")
+    st.markdown("Legend: Distribution across all characteristics")
 
-# PARETO (FIXED)
+# PARETO CLEAN
 with c6:
     pareto = stats.copy()
     pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
-    pareto = pareto.sort_values("OOS", ascending=False)
+    pareto = pareto.sort_values("OOS", ascending=False).head(10)
 
-    pareto["CumSum"] = pareto["OOS"].cumsum()
-    pareto["CumPerc"] = 100 * pareto["CumSum"] / pareto["OOS"].sum()
+    pareto["CumPerc"] = 100 * pareto["OOS"].cumsum() / pareto["OOS"].sum()
 
-    fig, ax1 = plt.subplots(figsize=(6, 4))
+    fig, ax1 = plt.subplots(figsize=(8,4))
 
-    # bars
-    ax1.bar(pareto["Characteristic"], pareto["OOS"])
-    ax1.set_ylabel("OOS Count")
+    ax1.bar(range(len(pareto)), pareto["OOS"])
+    ax1.set_xticks(range(len(pareto)))
 
-    # line
+    labels = [l if len(l)<20 else l[:17]+"..." for l in pareto["Characteristic"]]
+    ax1.set_xticklabels(labels, rotation=30, ha="right")
+
     ax2 = ax1.twinx()
-    ax2.plot(pareto["Characteristic"], pareto["CumPerc"], marker="o")
-    ax2.set_ylabel("Cumulative %")
-
-    # 80% threshold
+    ax2.plot(range(len(pareto)), pareto["CumPerc"], marker="o")
     ax2.axhline(80, linestyle="--")
 
-    plt.xticks(rotation=90)
+    ax1.set_title("Pareto OOS")
 
+    plt.tight_layout()
     st.pyplot(fig)
-    st.markdown("Legend: bars = OOS count | line = cumulative % | dashed = 80% threshold")
+    st.markdown("Legend: bars = OOS | line = cumulative % | dashed = 80%")
