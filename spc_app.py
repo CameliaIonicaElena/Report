@@ -42,11 +42,10 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS (FIXED)
+# FILTERS
 # =========================
 st.sidebar.header("Filters")
 
-# ---- DATE
 min_d, max_d = df["DATE"].min(), df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
@@ -59,37 +58,22 @@ start_date, end_date = st.sidebar.date_input(
 df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
         (df["DATE"] <= pd.to_datetime(end_date))]
 
-# ---- RAW MATERIAL (FIXED)
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
-
-select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
-
-if select_all_m:
-    selected_materials = materials
-else:
-    selected_materials = st.sidebar.multiselect(
-        "RAW MATERIAL",
-        materials,
-        default=materials
-    )
-
-df = df[df["RAW MATERIAL"].isin(selected_materials)]
-
-# ---- COLOR (FIXED)
 colors = sorted(df["COLOR"].dropna().unique())
 
-select_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
-
-if select_all_c:
-    selected_colors = colors
+if st.sidebar.checkbox("Select all RAW MATERIAL", True):
+    selected_m = materials
 else:
-    selected_colors = st.sidebar.multiselect(
-        "COLOR",
-        colors,
-        default=colors
-    )
+    selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
 
-df = df[df["COLOR"].isin(selected_colors)]
+df = df[df["RAW MATERIAL"].isin(selected_m)]
+
+if st.sidebar.checkbox("Select all COLOR", True):
+    selected_c = colors
+else:
+    selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
+
+df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
 # LIMITS
@@ -126,7 +110,7 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# STYLE TABLE (FIXED)
+# STYLE TABLE
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -134,10 +118,11 @@ def style(df):
     s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold;text-decoration:underline"
     return s
 
+st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# SELECT CHARACTERISTIC
+# MEASUREMENT POINT
 # =========================
 st.markdown("## Measurement point")
 
@@ -148,13 +133,12 @@ spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# CHARTS
+# CHARACTERISTIC ANALYSIS
 # =========================
 st.markdown("## Characteristic analysis")
 
 c1, c2 = st.columns(2)
 
-# CONTROL CHART
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
@@ -167,10 +151,8 @@ with c1:
     ax.grid()
 
     st.pyplot(fig)
+    st.markdown("Legend: Mean / USL / LSL / Measurements")
 
-    st.markdown("**Legend:** Mean, USL, LSL, measurements")
-
-# HISTOGRAM
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
 
@@ -179,21 +161,19 @@ with c2:
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
         y = norm.pdf(x, values.mean(), values.std())
-        ax.plot(x, y, color="black")
+        ax.plot(x, y)
 
     ax.set_title("Histogram + Normal Curve")
     ax.grid()
 
     st.pyplot(fig)
-
-    st.markdown("**Legend:** histogram + fitted normal distribution")
+    st.markdown("Legend: Distribution + Normal fit")
 
 # =========================
 # SECOND ROW
 # =========================
 c3, c4 = st.columns(2)
 
-# I-MR
 with c3:
     if len(values) > 1:
 
@@ -220,10 +200,8 @@ with c3:
         ax[1].grid()
 
         st.pyplot(fig)
+        st.markdown("Legend: variation + control limits")
 
-        st.markdown("**Legend:** center line, control limits, moving variation")
-
-# CAPABILITY
 with c4:
     fig, ax = plt.subplots()
 
@@ -234,5 +212,42 @@ with c4:
     ax.grid()
 
     st.pyplot(fig)
+    st.markdown(f"Legend: Cp={spec['Cp']:.2f}, Cpk={spec['Cpk']:.2f}")
 
-    st.markdown(f"**Legend:** Cp={spec['Cp']:.2f}, Cpk={spec['Cpk']:.2f}, threshold=1.33")
+# =========================
+# GLOBAL OVERVIEW
+# =========================
+st.markdown("## General overview for selected closure")
+
+c5, c6 = st.columns(2)
+
+# BOX PLOT
+with c5:
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    df.boxplot(column="Value", by="Characteristic", ax=ax, grid=False)
+
+    ax.set_title("")
+    ax.set_xlabel("")
+    ax.set_ylabel("Value")
+    plt.xticks(rotation=90)
+
+    st.pyplot(fig)
+    st.markdown("Legend: distribution per characteristic")
+
+# PARETO OOS
+with c6:
+    pareto = stats.copy()
+    pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
+    pareto = pareto.sort_values("OOS", ascending=False)
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    ax.bar(pareto["Characteristic"], pareto["OOS"])
+    plt.xticks(rotation=90)
+
+    ax.set_title("")
+    ax.grid()
+
+    st.pyplot(fig)
+    st.markdown("Legend: OOS prioritization (Pareto)")
