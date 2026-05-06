@@ -11,7 +11,7 @@ st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# LOAD DATASETS
+# DATASETS
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -47,7 +47,8 @@ df = df.dropna(subset=["Value", "DATE"])
 # =========================
 st.sidebar.header("Filters")
 
-min_d, max_d = df["DATE"].min(), df["DATE"].max()
+min_d = df["DATE"].min()
+max_d = df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
     "Date range",
@@ -140,7 +141,15 @@ def cap(x):
 stats["Capability"] = stats["Cpk"].apply(cap)
 
 # =========================
-# STYLE
+# PARETO
+# =========================
+pareto = stats[["Characteristic", "Above OOS", "Below OOS"]].copy()
+pareto["Total OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
+pareto = pareto.sort_values("Total OOS", ascending=False)
+pareto["Cum %"] = pareto["Total OOS"].cumsum() / pareto["Total OOS"].sum() * 100
+
+# =========================
+# STYLE TABLE
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -148,14 +157,11 @@ def style(df):
     s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
     return s
 
-# =========================
-# TABLE
-# =========================
 st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# SELECT CHARACTERISTIC
+# CHARACTERISTIC
 # =========================
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
@@ -164,34 +170,30 @@ vals = data["Value"].dropna()
 row = stats[stats["Characteristic"] == char].iloc[0]
 
 # =========================
-# SUMMARY (UNDER SELECTBOX)
+# SUMMARY
 # =========================
 st.subheader("Summary")
 
-st.dataframe(
-    pd.DataFrame({
-        "Mean": [row["Mean"]],
-        "Std": [row["Std"]],
-        "Min": [row["Min"]],
-        "Max": [row["Max"]],
-        "Range": [row["Range"]],
-        "Cp": [row["Cp"]],
-        "Cpk": [row["Cpk"]],
-        "Above OOS": [row["Above OOS"]],
-        "Below OOS": [row["Below OOS"]],
-        "Capability": [row["Capability"]],
-    }),
-    use_container_width=True
-)
+st.dataframe(pd.DataFrame({
+    "Mean": [row["Mean"]],
+    "Std": [row["Std"]],
+    "Min": [row["Min"]],
+    "Max": [row["Max"]],
+    "Range": [row["Range"]],
+    "Cp": [row["Cp"]],
+    "Cpk": [row["Cpk"]],
+    "Above OOS": [row["Above OOS"]],
+    "Below OOS": [row["Below OOS"]],
+    "Capability": [row["Capability"]],
+}), use_container_width=True)
 
 # =========================
 # ROW 1: CONTROL + HISTOGRAM
 # =========================
-st.subheader("Distribution Analysis")
+st.subheader("Distribution")
 
 col1, col2 = st.columns(2)
 
-# CONTROL CHART
 with col1:
     st.markdown("### Control Chart")
     fig, ax = plt.subplots()
@@ -202,9 +204,8 @@ with col1:
     ax.grid()
     st.pyplot(fig)
 
-# HISTOGRAM
 with col2:
-    st.markdown("### Histogram + Normal Curve")
+    st.markdown("### Histogram + Normal")
     fig, ax = plt.subplots()
     ax.hist(vals, bins=20, density=True, alpha=0.6)
 
@@ -217,15 +218,15 @@ with col2:
     st.pyplot(fig)
 
 # =========================
-# ROW 2: MOVING RANGE + CAPABILITY
+# ROW 2: MR + CAPABILITY
 # =========================
-st.subheader("Process Stability & Capability")
+st.subheader("Stability & Capability")
 
 col3, col4 = st.columns(2)
 
-# MOVING RANGE
 with col3:
     st.markdown("### Moving Range")
+
     mr = vals.diff().abs().dropna()
 
     fig, ax = plt.subplots()
@@ -238,17 +239,52 @@ with col3:
     ax.grid()
     st.pyplot(fig)
 
-# CAPABILITY
 with col4:
     st.markdown("### Capability (Cp / Cpk)")
 
     fig, ax = plt.subplots()
     ax.bar(["Cp", "Cpk"], [row["Cp"], row["Cpk"]])
-
     ax.axhline(1.33, color="red", linestyle="--")
     ax.axhline(1.0, color="orange", linestyle="--")
-
     ax.set_ylim(0, max(2, row["Cp"], row["Cpk"]))
     ax.grid()
-
     st.pyplot(fig)
+
+# =========================
+# BOXPLOT
+# =========================
+st.subheader("Boxplot per Characteristic")
+
+fig, ax = plt.subplots(figsize=(10, 4))
+
+box_data = [
+    df[df["Characteristic"] == c]["Value"].dropna()
+    for c in stats["Characteristic"]
+]
+
+ax.boxplot(box_data, labels=stats["Characteristic"], showfliers=True)
+ax.tick_params(axis='x', rotation=90)
+ax.grid()
+
+st.pyplot(fig)
+
+# =========================
+# PARETO
+# =========================
+st.subheader("Pareto OOS")
+
+fig, ax1 = plt.subplots()
+
+ax1.bar(pareto["Characteristic"], pareto["Total OOS"])
+ax1.set_ylabel("OOS")
+
+ax2 = ax1.twinx()
+ax2.plot(pareto["Characteristic"], pareto["Cum %"], color="red", marker="o")
+ax2.set_ylabel("Cumulative %")
+
+ax2.axhline(80, linestyle="--", color="gray")
+
+plt.xticks(rotation=90)
+plt.tight_layout()
+
+st.pyplot(fig)
