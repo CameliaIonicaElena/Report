@@ -176,7 +176,6 @@ c3, c4 = st.columns(2)
 
 with c3:
     if len(values) > 1:
-
         mean = values.mean()
         mr = values.diff().abs().dropna()
         sigma = mr.mean() / 1.128
@@ -235,19 +234,30 @@ with c5:
     st.pyplot(fig)
     st.markdown("Legend: distribution per characteristic")
 
-# PARETO OOS
+# PARETO (FIXED)
 with c6:
     pareto = stats.copy()
     pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
     pareto = pareto.sort_values("OOS", ascending=False)
 
-    fig, ax = plt.subplots(figsize=(6, 4))
+    pareto["CumSum"] = pareto["OOS"].cumsum()
+    pareto["CumPerc"] = 100 * pareto["CumSum"] / pareto["OOS"].sum()
 
-    ax.bar(pareto["Characteristic"], pareto["OOS"])
+    fig, ax1 = plt.subplots(figsize=(6, 4))
+
+    # bars
+    ax1.bar(pareto["Characteristic"], pareto["OOS"])
+    ax1.set_ylabel("OOS Count")
+
+    # line
+    ax2 = ax1.twinx()
+    ax2.plot(pareto["Characteristic"], pareto["CumPerc"], marker="o")
+    ax2.set_ylabel("Cumulative %")
+
+    # 80% threshold
+    ax2.axhline(80, linestyle="--")
+
     plt.xticks(rotation=90)
 
-    ax.set_title("")
-    ax.grid()
-
     st.pyplot(fig)
-    st.markdown("Legend: OOS prioritization (Pareto)")
+    st.markdown("Legend: bars = OOS count | line = cumulative % | dashed = 80% threshold")
