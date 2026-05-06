@@ -8,7 +8,6 @@ from scipy.stats import norm
 # CONFIG
 # =========================
 st.set_page_config(layout="wide")
-
 st.title("SPC Dashboard")
 
 # =========================
@@ -21,8 +20,10 @@ files = {
 }
 
 selected_file = st.sidebar.selectbox("Select dataset", list(files.keys()))
-df_meas = pd.read_excel(files[selected_file], sheet_name="Measurements")
-df_specs = pd.read_excel(files[selected_file], sheet_name="Specs")
+file_path = files[selected_file]
+
+df_meas = pd.read_excel(file_path, sheet_name="Measurements")
+df_specs = pd.read_excel(file_path, sheet_name="Specs")
 
 df_meas.columns = df_meas.columns.str.strip()
 df_specs.columns = df_specs.columns.str.strip()
@@ -41,10 +42,11 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS
+# FILTERS (FIXED)
 # =========================
 st.sidebar.header("Filters")
 
+# ---- DATE
 min_d, max_d = df["DATE"].min(), df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
@@ -57,18 +59,37 @@ start_date, end_date = st.sidebar.date_input(
 df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
         (df["DATE"] <= pd.to_datetime(end_date))]
 
+# ---- RAW MATERIAL (FIXED)
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
+
+select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
+
+if select_all_m:
+    selected_materials = materials
+else:
+    selected_materials = st.sidebar.multiselect(
+        "RAW MATERIAL",
+        materials,
+        default=materials
+    )
+
+df = df[df["RAW MATERIAL"].isin(selected_materials)]
+
+# ---- COLOR (FIXED)
 colors = sorted(df["COLOR"].dropna().unique())
 
-df = df[df["RAW MATERIAL"].isin(
-    materials if st.sidebar.checkbox("All materials", True)
-    else st.sidebar.multiselect("RAW MATERIAL", materials)
-)]
+select_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
 
-df = df[df["COLOR"].isin(
-    colors if st.sidebar.checkbox("All colors", True)
-    else st.sidebar.multiselect("COLOR", colors)
-)]
+if select_all_c:
+    selected_colors = colors
+else:
+    selected_colors = st.sidebar.multiselect(
+        "COLOR",
+        colors,
+        default=colors
+    )
+
+df = df[df["COLOR"].isin(selected_colors)]
 
 # =========================
 # LIMITS
@@ -92,8 +113,6 @@ stats = pd.DataFrame({
     "Count": g["Value"].count()
 }).reset_index(drop=True)
 
-stats["Range"] = stats["Max"] - stats["Min"]
-
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
 stats["Cpk"] = np.minimum(
     (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
@@ -107,7 +126,7 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# STYLE TABLE
+# STYLE TABLE (FIXED)
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -118,7 +137,7 @@ def style(df):
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# SELECTION
+# SELECT CHARACTERISTIC
 # =========================
 st.markdown("## Measurement point")
 
@@ -129,7 +148,7 @@ spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# CHARACTERISTIC ANALYSIS
+# CHARTS
 # =========================
 st.markdown("## Characteristic analysis")
 
@@ -139,7 +158,7 @@ c1, c2 = st.columns(2)
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(values.values, marker="o", linewidth=1)
+    ax.plot(values.values, marker="o")
     ax.axhline(spec["Mean"], color="green")
     ax.axhline(spec["USL"], color="red")
     ax.axhline(spec["LSL"], color="red")
@@ -148,7 +167,8 @@ with c1:
     ax.grid()
 
     st.pyplot(fig)
-    st.caption("Mean / USL / LSL reference lines")
+
+    st.markdown("**Legend:** Mean, USL, LSL, measurements")
 
 # HISTOGRAM
 with c2:
@@ -159,13 +179,14 @@ with c2:
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
         y = norm.pdf(x, values.mean(), values.std())
-        ax.plot(x, y)
+        ax.plot(x, y, color="black")
 
-    ax.set_title("Distribution")
+    ax.set_title("Histogram + Normal Curve")
     ax.grid()
 
     st.pyplot(fig)
-    st.caption("Histogram + normal approximation")
+
+    st.markdown("**Legend:** histogram + fitted normal distribution")
 
 # =========================
 # SECOND ROW
@@ -199,7 +220,8 @@ with c3:
         ax[1].grid()
 
         st.pyplot(fig)
-        st.caption("Process variation monitoring")
+
+        st.markdown("**Legend:** center line, control limits, moving variation")
 
 # CAPABILITY
 with c4:
@@ -212,41 +234,5 @@ with c4:
     ax.grid()
 
     st.pyplot(fig)
-    st.caption("Process capability indices")
 
-# =========================
-# GLOBAL OVERVIEW
-# =========================
-st.markdown("## General overview for selected closure")
-
-c5, c6 = st.columns(2)
-
-# BOXPLOT (FIXED CLEAN)
-with c5:
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    df.boxplot(column="Value", by="Characteristic", ax=ax, grid=False)
-    ax.set_title("")
-    ax.set_xlabel("")
-    ax.set_ylabel("Value")
-    plt.xticks(rotation=90)
-
-    st.pyplot(fig)
-    st.caption("Distribution per characteristic")
-
-# PARETO
-with c6:
-    pareto = stats.copy()
-    pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
-    pareto = pareto.sort_values("OOS", ascending=False)
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    ax.bar(pareto["Characteristic"], pareto["OOS"])
-    plt.xticks(rotation=90)
-
-    ax.set_title("")
-    ax.grid()
-
-    st.pyplot(fig)
-    st.caption("OOS prioritization (Pareto principle)")
+    st.markdown(f"**Legend:** Cp={spec['Cp']:.2f}, Cpk={spec['Cpk']:.2f}, threshold=1.33")
