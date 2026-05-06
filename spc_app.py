@@ -6,35 +6,37 @@ from scipy.stats import norm
 import os
 
 # =========================
-# CONFIG
+# CONFIG (MUST BE FIRST)
 # =========================
-
 st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# PATH LOCAL SHAREPOINT SYNC
+# BASE PATH (SharePoint sync local)
 # =========================
 BASE_PATH = r"C:\Users\RO10471\SIG\GQM Spouts - Documents\Measurements-test files"
 
-files = {
-    "Dataset Original": "Test-Measurements&Specs.xlsx",
-    "Dataset 1": "Test-Measurements&Specs1.xlsx",
-    "Dataset 2": "Test-Measurements&Specs2.xlsx"
-}
-
-selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
-file_path = os.path.join(BASE_PATH, files[selected])
-
 # =========================
-# CHECK FILE
+# SAFETY CHECK
 # =========================
-if not os.path.exists(file_path):
-    st.error(f"File not found: {file_path}")
+if not os.path.exists(BASE_PATH):
+    st.error(f"Folder not found: {BASE_PATH}")
+    st.stop()
+
+files_list = [f for f in os.listdir(BASE_PATH) if f.endswith(".xlsx")]
+
+if len(files_list) == 0:
+    st.error("No Excel files found in folder")
     st.stop()
 
 # =========================
-# LOAD DATA
+# DATASET SELECTOR (DYNAMIC)
+# =========================
+selected_file = st.sidebar.selectbox("Select dataset", files_list)
+file_path = os.path.join(BASE_PATH, selected_file)
+
+# =========================
+# LOAD DATA (SAFE)
 # =========================
 df_meas = pd.read_excel(file_path, sheet_name="Measurements")
 df_specs = pd.read_excel(file_path, sheet_name="Specs")
@@ -52,16 +54,17 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
-df["DATE"] = pd.to_datetime(df["DATE"])
+
+df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+
+df = df.dropna(subset=["Value", "DATE"])
 
 # =========================
 # FILTERS
 # =========================
 st.sidebar.header("Filters")
 
-# DATE RANGE
-min_date = df["DATE"].min()
-max_date = df["DATE"].max()
+min_date, max_date = df["DATE"].min(), df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
     "Date range",
@@ -70,13 +73,14 @@ start_date, end_date = st.sidebar.date_input(
     max_value=max_date
 )
 
-df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
+df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
+        (df["DATE"] <= pd.to_datetime(end_date))]
 
 # RAW MATERIAL
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
-sel_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
+select_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
 
-selected_materials = materials if sel_all_m else st.sidebar.multiselect(
+selected_materials = materials if select_all_m else st.sidebar.multiselect(
     "RAW MATERIAL", materials
 )
 
@@ -85,9 +89,9 @@ if selected_materials:
 
 # COLOR
 colors = sorted(df["COLOR"].dropna().unique())
-sel_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
+select_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
 
-selected_colors = colors if sel_all_c else st.sidebar.multiselect(
+selected_colors = colors if select_all_c else st.sidebar.multiselect(
     "COLOR", colors
 )
 
@@ -139,7 +143,7 @@ stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 # =========================
 # CAPABILITY
 # =========================
-def cap(x):
+def capability(x):
     if pd.isna(x):
         return "No data"
     elif x >= 1.67:
@@ -150,7 +154,7 @@ def cap(x):
         return "Marginal"
     return "Not capable"
 
-stats["Capability"] = stats["Cpk"].apply(cap)
+stats["Capability"] = stats["Cpk"].apply(capability)
 stats["OK"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
 
 # =========================
@@ -166,16 +170,17 @@ st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# SELECT CHARACTERISTIC
+# CHARACTERISTIC SELECTOR
 # =========================
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
+
 values = data["Value"].dropna()
 
 # =========================
-# CHARTS (WIDE LAYOUT)
+# CHARTS LAYOUT
 # =========================
 st.subheader("Charts")
 
