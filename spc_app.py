@@ -11,7 +11,7 @@ st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# LOAD DATA
+# LOAD DATASETS
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -86,7 +86,7 @@ df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
 # =========================
-# STATS TABLE
+# STATS
 # =========================
 g = df.groupby("Characteristic")
 
@@ -101,7 +101,6 @@ stats = pd.DataFrame({
     "Count": g["Value"].count()
 }).reset_index(drop=True)
 
-# safe std
 stats["Std"] = stats["Std"].replace(0, np.nan)
 
 # =========================
@@ -115,14 +114,18 @@ stats["Cpk"] = np.minimum(
 
 stats["Range"] = stats["Max"] - stats["Min"]
 
+# =========================
 # OOS
+# =========================
 above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
 below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 
 stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
-# Capability
+# =========================
+# CAPABILITY
+# =========================
 def cap(x):
     if pd.isna(x):
         return "No data"
@@ -137,7 +140,7 @@ def cap(x):
 stats["Capability"] = stats["Cpk"].apply(cap)
 
 # =========================
-# STYLE OOS (RED + BOLD)
+# STYLE TABLE
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -145,9 +148,6 @@ def style(df):
     s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
     return s
 
-# =========================
-# TABLE (FULL WIDTH)
-# =========================
 st.subheader("Summary Table")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
@@ -156,24 +156,41 @@ st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 # =========================
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
-d = df[df["Characteristic"] == char]
-vals = d["Value"].dropna()
-
+data = df[df["Characteristic"] == char]
+vals = data["Value"].dropna()
 row = stats[stats["Characteristic"] == char].iloc[0]
 
 # =========================
-# LAYOUT (WIDE DASHBOARD)
+# SUMMARY (FIXED POSITION)
+# =========================
+st.subheader("Summary")
+
+st.dataframe(
+    pd.DataFrame({
+        "Mean": [row["Mean"]],
+        "Std": [row["Std"]],
+        "Min": [row["Min"]],
+        "Max": [row["Max"]],
+        "Range": [row["Range"]],
+        "Cp": [row["Cp"]],
+        "Cpk": [row["Cpk"]],
+        "Above OOS": [row["Above OOS"]],
+        "Below OOS": [row["Below OOS"]],
+        "Capability": [row["Capability"]],
+    }),
+    use_container_width=True
+)
+
+# =========================
+# CHARTS LAYOUT
 # =========================
 st.subheader("Analysis")
 
 col1, col2, col3 = st.columns(3)
 
-# -------------------------
 # CONTROL CHART
-# -------------------------
 with col1:
     st.markdown("### Control Chart")
-
     fig, ax = plt.subplots()
     ax.plot(vals.values, marker="o", linewidth=1)
     ax.axhline(row["Mean"], color="green")
@@ -182,9 +199,7 @@ with col1:
     ax.grid()
     st.pyplot(fig)
 
-# -------------------------
-# HISTOGRAM + NORMAL
-# -------------------------
+# HISTOGRAM
 with col2:
     st.markdown("### Histogram + Normal")
 
@@ -199,9 +214,7 @@ with col2:
     ax.grid()
     st.pyplot(fig)
 
-# -------------------------
 # MOVING RANGE
-# -------------------------
 with col3:
     st.markdown("### Moving Range")
 
@@ -218,41 +231,14 @@ with col3:
     st.pyplot(fig)
 
 # =========================
-# SECOND ROW (CAPABILITY + SUMMARY)
+# CAPABILITY CHART
 # =========================
-col4, col5 = st.columns(2)
+st.subheader("Capability (Cp / Cpk)")
 
-# -------------------------
-# CAPABILITY VIEW
-# -------------------------
-with col4:
-    st.markdown("### Capability")
-
-    fig, ax = plt.subplots()
-    ax.bar(["Cp", "Cpk"], [row["Cp"], row["Cpk"]])
-    ax.axhline(1.33, color="red", linestyle="--")
-    ax.axhline(1.0, color="orange", linestyle="--")
-    ax.set_ylim(0, max(2, row["Cp"], row["Cpk"]))
-    ax.grid()
-    st.pyplot(fig)
-
-# -------------------------
-# SUMMARY STATS
-# -------------------------
-with col5:
-    st.markdown("### Summary")
-
-    st.dataframe(
-        pd.DataFrame({
-            "Mean": [row["Mean"]],
-            "Std": [row["Std"]],
-            "Min": [row["Min"]],
-            "Max": [row["Max"]],
-            "Range": [row["Range"]],
-            "Cp": [row["Cp"]],
-            "Cpk": [row["Cpk"]],
-            "Above OOS": [row["Above OOS"]],
-            "Below OOS": [row["Below OOS"]],
-        }),
-        use_container_width=True
-    )
+fig, ax = plt.subplots()
+ax.bar(["Cp", "Cpk"], [row["Cp"], row["Cpk"]])
+ax.axhline(1.33, color="red", linestyle="--")
+ax.axhline(1.0, color="orange", linestyle="--")
+ax.set_ylim(0, max(2, row["Cp"], row["Cpk"]))
+ax.grid()
+st.pyplot(fig)
