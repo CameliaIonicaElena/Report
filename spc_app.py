@@ -1,113 +1,241 @@
-import requests
-from io import BytesIO
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+import os
 
-@st.cache_data(ttl=600)
-def load_data(url):
-    response = requests.get(url)
-    
-    if response.status_code != 200:
-        raise Exception("Failed to load file from SharePoint")
+# =========================
+# CONFIG
+# =========================
+st.set_page_config(layout="wide")
+st.title("SPC Dashboard")
 
-    xls = pd.ExcelFile(BytesIO(response.content))
+# =========================
+# PATH LOCAL SHAREPOINT SYNC
+# =========================
+BASE_PATH = r"C:\Users\RO10471\SIG\GQM Spouts - Documents\Measurements-test files"
 
-    df_meas = xls.parse("Measurements")
-    df_specs = xls.parse("Specs")
+files = {
+    "Dataset Original": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx"
+}
 
-    df_meas.columns = df_meas.columns.str.strip()
-    df_specs.columns = df_specs.columns.str.strip()
+selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
+file_path = os.path.join(BASE_PATH, files[selected])
 
-    return df_meas, df_specs
-# ==============================
-# 🎯 SELECT FILE
-# ==============================
-selected_file = st.selectbox("Select dataset", list(files.keys()))
+# =========================
+# CHECK FILE
+# =========================
+if not os.path.exists(file_path):
+    st.error(f"File not found: {file_path}")
+    st.stop()
 
-df_meas, df_specs = load_data(files[selected_file])
+# =========================
+# LOAD DATA
+# =========================
+df_meas = pd.read_excel(file_path, sheet_name="Measurements")
+df_specs = pd.read_excel(file_path, sheet_name="Specs")
 
-# ==============================
-# 🔄 REFRESH BUTTON
-# ==============================
-if st.button("🔄 Refresh data"):
-    st.cache_data.clear()
-    st.rerun()
+df_meas.columns = df_meas.columns.str.strip()
+df_specs.columns = df_specs.columns.str.strip()
 
-# ==============================
-# 🔧 UNPIVOT MEASUREMENTS
-# ==============================
-id_vars = ["Date", "RAW MATERIAL", "COLOR"]
-
+# =========================
+# TRANSFORM
+# =========================
 df_long = df_meas.melt(
-    id_vars=id_vars,
+    id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
     value_name="Value"
 )
 
-# ==============================
-# 🔗 MERGE WITH SPECS
-# ==============================
 df = df_long.merge(df_specs, on="Characteristic", how="left")
+df["DATE"] = pd.to_datetime(df["DATE"])
 
-# ==============================
-# 🎯 FILTERS
-# ==============================
+# =========================
+# FILTERS
+# =========================
 st.sidebar.header("Filters")
 
+# DATE RANGE
+min_date = df["DATE"].min()
+max_date = df["DATE"].max()
+
+start_date, end_date = st.sidebar.date_input(
+    "Date range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
+
+# RAW MATERIAL
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
-selected_material = st.sidebar.selectbox("Raw Material", ["All"] + materials)
+sel_all_m = st.sidebar.checkbox("Select all RAW MATERIAL", value=True)
 
+selected_materials = materials if sel_all_m else st.sidebar.multiselect(
+    "RAW MATERIAL", materials
+)
+
+if selected_materials:
+    df = df[df["RAW MATERIAL"].isin(selected_materials)]
+
+# COLOR
 colors = sorted(df["COLOR"].dropna().unique())
-selected_color = st.sidebar.selectbox("Color", ["All"] + colors)
+sel_all_c = st.sidebar.checkbox("Select all COLOR", value=True)
 
-chars = sorted(df["Characteristic"].dropna().unique())
-selected_char = st.sidebar.selectbox("Characteristic", ["All"] + chars)
+selected_colors = colors if sel_all_c else st.sidebar.multiselect(
+    "COLOR", colors
+)
 
-# ==============================
-# 🧹 APPLY FILTERS
-# ==============================
-df_filtered = df.copy()
+if selected_colors:
+    df = df[df["COLOR"].isin(selected_colors)]
 
-if selected_material != "All":
-    df_filtered = df_filtered[df_filtered["RAW MATERIAL"] == selected_material]
+# =========================
+# SPEC LIMITS
+# =========================
+df["USL"] = df["Target"] + df["Upper Dev"]
+df["LSL"] = df["Target"] + df["Lower Dev"]
 
-if selected_color != "All":
-    df_filtered = df_filtered[df_filtered["COLOR"] == selected_color]
+# =========================
+# STATS
+# =========================
+g = df.groupby("Characteristic")
 
-if selected_char != "All":
-    df_filtered = df_filtered[df_filtered["Characteristic"] == selected_char]
+stats = pd.DataFrame({
+    "Characteristic": g["Characteristic"].first(),
+    "USL": g["USL"].first(),
+    "LSL": g["LSL"].first(),
+    "Xbar": g["Value"].mean(),
+    "Std": g["Value"].std(),
+    "Max": g["Value"].max(),
+    "Min": g["Value"].min(),
+    "Count": g["Value"].count()
+}).reset_index(drop=True)
 
-# ==============================
-# 📊 KPI CALCULATIONS
-# ==============================
-df_filtered["Value"] = pd.to_numeric(df_filtered["Value"], errors="coerce")
+stats["Range"] = stats["Max"] - stats["Min"]
+stats["+3s"] = stats["Xbar"] + 3 * stats["Std"]
+stats["-3s"] = stats["Xbar"] - 3 * stats["Std"]
 
-mean_val = df_filtered["Value"].mean()
-std_val = df_filtered["Value"].std()
+stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
 
-# dacă ai USL / LSL în Specs
-if "USL" in df_filtered.columns and "LSL" in df_filtered.columns:
-    df_filtered["USL"] = pd.to_numeric(df_filtered["USL"], errors="coerce")
-    df_filtered["LSL"] = pd.to_numeric(df_filtered["LSL"], errors="coerce")
+stats["Cpk"] = np.minimum(
+    (stats["USL"] - stats["Xbar"]) / (3 * stats["Std"]),
+    (stats["Xbar"] - stats["LSL"]) / (3 * stats["Std"])
+)
 
-    cp = (df_filtered["USL"].iloc[0] - df_filtered["LSL"].iloc[0]) / (6 * std_val) if std_val != 0 else None
+# =========================
+# OUT OF SPEC
+# =========================
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+
+# =========================
+# CAPABILITY
+# =========================
+def cap(x):
+    if pd.isna(x):
+        return "No data"
+    elif x >= 1.67:
+        return "Excellent"
+    elif x >= 1.33:
+        return "Capable"
+    elif x >= 1.0:
+        return "Marginal"
+    return "Not capable"
+
+stats["Capability"] = stats["Cpk"].apply(cap)
+stats["OK"] = np.where(stats["Cpk"] >= 1.33, "YES", "NO")
+
+# =========================
+# STYLE OOS (RED + BOLD)
+# =========================
+def style(df):
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+    return s
+
+st.subheader("SPC Summary")
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+
+# =========================
+# SELECT CHARACTERISTIC
+# =========================
+char = st.selectbox("Characteristic", stats["Characteristic"])
+
+data = df[df["Characteristic"] == char]
+spec = stats[stats["Characteristic"] == char].iloc[0]
+values = data["Value"].dropna()
+
+# =========================
+# CHARTS (WIDE LAYOUT)
+# =========================
+st.subheader("Charts")
+
+col1, col2 = st.columns(2)
+
+# CONTROL CHART
+with col1:
+    fig, ax = plt.subplots()
+    ax.plot(values.values, marker="o")
+    ax.axhline(spec["Xbar"], color="green")
+    ax.axhline(spec["USL"], color="red")
+    ax.axhline(spec["LSL"], color="red")
+    ax.set_title("Control Chart")
+    ax.grid()
+    st.pyplot(fig)
+
+# HISTOGRAM
+with col2:
+    fig2, ax2 = plt.subplots()
+    ax2.hist(values, bins=20, density=True, alpha=0.6)
+
+    if len(values) > 1:
+        x = np.linspace(values.min(), values.max(), 100)
+        y = norm.pdf(x, values.mean(), values.std())
+        ax2.plot(x, y, color="red")
+
+    ax2.set_title("Histogram")
+    ax2.grid()
+    st.pyplot(fig2)
+
+# =========================
+# I-MR CHART
+# =========================
+st.subheader("I-MR Chart")
+
+if len(values) > 1:
+
+    mean = values.mean()
+    mr = values.diff().abs().dropna()
+
+    sigma = mr.mean() / 1.128
+
+    UCL = mean + 3 * sigma
+    LCL = mean - 3 * sigma
+
+    fig, ax = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
+
+    ax[0].plot(values.values, marker="o")
+    ax[0].axhline(mean, color="green")
+    ax[0].axhline(UCL, color="red", linestyle="--")
+    ax[0].axhline(LCL, color="red", linestyle="--")
+    ax[0].grid()
+
+    MR_UCL = mr.mean() * 3.267
+
+    ax[1].plot(mr.values, marker="o", color="orange")
+    ax[1].axhline(mr.mean(), color="green")
+    ax[1].axhline(MR_UCL, color="red", linestyle="--")
+    ax[1].grid()
+
+    st.pyplot(fig)
+
 else:
-    cp = None
-
-# ==============================
-# 📊 DISPLAY
-# ==============================
-st.title("📊 SPC Dashboard")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Mean", round(mean_val, 3) if pd.notnull(mean_val) else "-")
-col2.metric("Std Dev", round(std_val, 3) if pd.notnull(std_val) else "-")
-col3.metric("Cp", round(cp, 3) if cp else "-")
-
-st.dataframe(df_filtered)
-
-# ==============================
-# 📈 CHART
-# ==============================
-st.line_chart(df_filtered.set_index("Date")["Value"])
+    st.warning("Not enough data")
