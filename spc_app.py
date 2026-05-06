@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import norm, probplot
+from scipy.stats import norm
 
 # =========================
 # CONFIG
@@ -13,29 +13,25 @@ st.title("SPC Dashboard")
 # =========================
 # LOAD DATA
 # =========================
-def load_data(file):
-    df_meas = pd.read_excel(file, sheet_name="Measurements")
-    df_specs = pd.read_excel(file, sheet_name="Specs")
-
-    df_meas.columns = df_meas.columns.str.strip()
-    df_specs.columns = df_specs.columns.str.strip()
-
-    return df_meas, df_specs
-
-
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
     "Dataset 1": "Test-Measurements&Specs1.xlsx",
     "Dataset 2": "Test-Measurements&Specs2.xlsx"
 }
 
-selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
-df_meas, df_specs = load_data(files[selected])
+selected_file = st.sidebar.selectbox("Select dataset", list(files.keys()))
+file_path = files[selected_file]
+
+df_meas = pd.read_excel(file_path, sheet_name="Measurements")
+df_specs = pd.read_excel(file_path, sheet_name="Specs")
+
+df_meas.columns = df_meas.columns.str.strip()
+df_specs.columns = df_specs.columns.str.strip()
 
 # =========================
 # TRANSFORM
 # =========================
-df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
+df_meas["DATE"] = pd.to_datetime(df_meas["DATE"], errors="coerce")
 
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
@@ -44,18 +40,20 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
+df = df.dropna(subset=["Value", "DATE"])
 
 # =========================
 # FILTERS
 # =========================
 st.sidebar.header("Filters")
 
-# DATE RANGE
 min_d, max_d = df["DATE"].min(), df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
     "Date range",
-    value=(min_d.date(), max_d.date())
+    value=(min_d.date(), max_d.date()),
+    min_value=min_d.date(),
+    max_value=max_d.date()
 )
 
 start_date = pd.to_datetime(start_date)
@@ -65,26 +63,30 @@ df = df[df["DATE"].between(start_date, end_date)]
 
 # RAW MATERIAL
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
-all_m = st.sidebar.checkbox("Select all RAW MATERIAL", True)
-sel_m = materials if all_m else st.sidebar.multiselect("RAW MATERIAL", materials)
-if sel_m:
-    df = df[df["RAW MATERIAL"].isin(sel_m)]
+if st.sidebar.checkbox("Select all RAW MATERIAL", True):
+    selected_m = materials
+else:
+    selected_m = st.sidebar.multiselect("RAW MATERIAL", materials)
+
+df = df[df["RAW MATERIAL"].isin(selected_m)]
 
 # COLOR
 colors = sorted(df["COLOR"].dropna().unique())
-all_c = st.sidebar.checkbox("Select all COLOR", True)
-sel_c = colors if all_c else st.sidebar.multiselect("COLOR", colors)
-if sel_c:
-    df = df[df["COLOR"].isin(sel_c)]
+if st.sidebar.checkbox("Select all COLOR", True):
+    selected_c = colors
+else:
+    selected_c = st.sidebar.multiselect("COLOR", colors)
+
+df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
-# LIMITS
+# SPEC LIMITS
 # =========================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
 # =========================
-# STATS
+# STATS TABLE
 # =========================
 g = df.groupby("Characteristic")
 
@@ -92,145 +94,165 @@ stats = pd.DataFrame({
     "Characteristic": g["Characteristic"].first(),
     "USL": g["USL"].first(),
     "LSL": g["LSL"].first(),
-    "Xbar": g["Value"].mean(),
+    "Mean": g["Value"].mean(),
     "Std": g["Value"].std(),
     "Max": g["Value"].max(),
     "Min": g["Value"].min(),
     "Count": g["Value"].count()
 }).reset_index(drop=True)
 
-stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
-stats["Cpk"] = np.minimum(
-    (stats["USL"] - stats["Xbar"]) / (3 * stats["Std"]),
-    (stats["Xbar"] - stats["LSL"]) / (3 * stats["Std"])
-)
+# safe std
+stats["Std"] = stats["Std"].replace(0, np.nan)
 
 # =========================
-# SELECT CHARACTERISTIC
+# METRICS
+# =========================
+stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
+stats["Cpk"] = np.minimum(
+    (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
+    (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
+)
+
+stats["Range"] = stats["Max"] - stats["Min"]
+
+# OOS
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+
+# Capability
+def cap(x):
+    if pd.isna(x):
+        return "No data"
+    if x >= 1.67:
+        return "Excellent"
+    if x >= 1.33:
+        return "Capable"
+    if x >= 1.0:
+        return "Marginal"
+    return "Not capable"
+
+stats["Capability"] = stats["Cpk"].apply(cap)
+
+# =========================
+# STYLE OOS (RED + BOLD)
+# =========================
+def style(df):
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+    return s
+
+# =========================
+# TABLE (FULL WIDTH)
+# =========================
+st.subheader("Summary Table")
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+
+# =========================
+# CHARACTERISTIC
 # =========================
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
-data = df[df["Characteristic"] == char]["Value"].dropna()
-spec = stats[stats["Characteristic"] == char].iloc[0]
+d = df[df["Characteristic"] == char]
+vals = d["Value"].dropna()
 
-# =========================================================
-# TOP LAYOUT: CONTROL + HISTOGRAM + MR + CAPABILITY
-# =========================================================
-st.subheader("Process Analysis")
+row = stats[stats["Characteristic"] == char].iloc[0]
+
+# =========================
+# LAYOUT (WIDE DASHBOARD)
+# =========================
+st.subheader("Analysis")
 
 col1, col2, col3 = st.columns(3)
 
-# =========================
-# CONTROL CHART (I)
-# =========================
+# -------------------------
+# CONTROL CHART
+# -------------------------
 with col1:
-    fig, ax = plt.subplots(figsize=(5, 4))
+    st.markdown("### Control Chart")
 
-    mean = data.mean()
-    mr = data.diff().abs().dropna()
-
-    sigma = mr.mean() / 1.128 if len(mr) > 0 else 0
-
-    UCL = mean + 3 * sigma
-    LCL = mean - 3 * sigma
-
-    ax.plot(data.values, marker="o")
-    ax.axhline(mean, color="green")
-    ax.axhline(UCL, color="red", linestyle="--")
-    ax.axhline(LCL, color="red", linestyle="--")
-
-    ax.set_title("I Chart")
+    fig, ax = plt.subplots()
+    ax.plot(vals.values, marker="o", linewidth=1)
+    ax.axhline(row["Mean"], color="green")
+    ax.axhline(row["USL"], color="red")
+    ax.axhline(row["LSL"], color="red")
     ax.grid()
-
     st.pyplot(fig)
 
-# =========================
-# HISTOGRAM + NORMAL CURVE
-# =========================
+# -------------------------
+# HISTOGRAM + NORMAL
+# -------------------------
 with col2:
-    fig, ax = plt.subplots(figsize=(5, 4))
+    st.markdown("### Histogram + Normal")
 
-    ax.hist(data, bins=20, density=True, alpha=0.6)
+    fig, ax = plt.subplots()
+    ax.hist(vals, bins=20, density=True, alpha=0.6)
 
-    if len(data) > 1:
-        x = np.linspace(data.min(), data.max(), 100)
-        ax.plot(x, norm.pdf(x, data.mean(), data.std()), color="red")
+    if len(vals) > 1:
+        x = np.linspace(vals.min(), vals.max(), 100)
+        y = norm.pdf(x, vals.mean(), vals.std())
+        ax.plot(x, y, color="red")
 
-    ax.axvline(spec["USL"], color="red", linestyle="--")
-    ax.axvline(spec["LSL"], color="red", linestyle="--")
-
-    ax.set_title("Histogram + Normal")
     ax.grid()
-
     st.pyplot(fig)
 
-# =========================
+# -------------------------
 # MOVING RANGE
-# =========================
+# -------------------------
 with col3:
-    fig, ax = plt.subplots(figsize=(5, 4))
+    st.markdown("### Moving Range")
 
-    mr = data.diff().abs().dropna()
+    mr = vals.diff().abs().dropna()
 
+    fig, ax = plt.subplots()
     ax.plot(mr.values, marker="o", color="orange")
+    ax.axhline(mr.mean(), color="green")
 
-    mr_mean = mr.mean() if len(mr) > 0 else 0
-    MR_UCL = mr_mean * 3.267
+    if len(mr) > 0:
+        ax.axhline(mr.mean() * 3.267, color="red", linestyle="--")
 
-    ax.axhline(mr_mean, color="green")
-    ax.axhline(MR_UCL, color="red", linestyle="--")
-
-    ax.set_title("Moving Range")
     ax.grid()
-
     st.pyplot(fig)
 
-# =========================================================
-# MIDDLE: CAPABILITY + NORMAL PROB PLOT
-# =========================================================
-st.subheader("Capability & Distribution")
-
+# =========================
+# SECOND ROW (CAPABILITY + SUMMARY)
+# =========================
 col4, col5 = st.columns(2)
 
-# =========================
-# CAPABILITY BAR
-# =========================
+# -------------------------
+# CAPABILITY VIEW
+# -------------------------
 with col4:
-    fig, ax = plt.subplots(figsize=(6, 4))
+    st.markdown("### Capability")
 
-    ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]], color=["blue", "orange"])
+    fig, ax = plt.subplots()
+    ax.bar(["Cp", "Cpk"], [row["Cp"], row["Cpk"]])
     ax.axhline(1.33, color="red", linestyle="--")
-
-    ax.set_title("Capability (Cp / Cpk)")
+    ax.axhline(1.0, color="orange", linestyle="--")
+    ax.set_ylim(0, max(2, row["Cp"], row["Cpk"]))
     ax.grid()
-
     st.pyplot(fig)
 
-# =========================
-# NORMAL PROBABILITY PLOT
-# =========================
+# -------------------------
+# SUMMARY STATS
+# -------------------------
 with col5:
-    fig, ax = plt.subplots(figsize=(6, 4))
+    st.markdown("### Summary")
 
-    probplot(data, dist="norm", plot=ax)
-
-    ax.set_title("Normal Probability Plot")
-    ax.grid()
-
-    st.pyplot(fig)
-
-# =========================================================
-# BOTTOM: SUMMARY STATS
-# =========================================================
-st.subheader("Summary Statistics")
-
-summary = pd.DataFrame({
-    "Mean": [data.mean()],
-    "Std": [data.std()],
-    "Min": [data.min()],
-    "Max": [data.max()],
-    "Cp": [spec["Cp"]],
-    "Cpk": [spec["Cpk"]]
-})
-
-st.dataframe(summary, use_container_width=True)
+    st.dataframe(
+        pd.DataFrame({
+            "Mean": [row["Mean"]],
+            "Std": [row["Std"]],
+            "Min": [row["Min"]],
+            "Max": [row["Max"]],
+            "Range": [row["Range"]],
+            "Cp": [row["Cp"]],
+            "Cpk": [row["Cpk"]],
+            "Above OOS": [row["Above OOS"]],
+            "Below OOS": [row["Below OOS"]],
+        }),
+        use_container_width=True
+    )
