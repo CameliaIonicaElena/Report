@@ -42,7 +42,7 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS
+# FILTERS (NU MODIFICAM)
 # =========================
 st.sidebar.header("Filters")
 
@@ -50,7 +50,9 @@ min_d, max_d = df["DATE"].min(), df["DATE"].max()
 
 start_date, end_date = st.sidebar.date_input(
     "Date range",
-    value=(min_d, max_d)
+    value=(min_d, max_d),
+    min_value=min_d,
+    max_value=max_d
 )
 
 df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
@@ -59,10 +61,18 @@ df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
-selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
+if st.sidebar.checkbox("Select all RAW MATERIAL", True):
+    selected_m = materials
+else:
+    selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
 
 df = df[df["RAW MATERIAL"].isin(selected_m)]
+
+if st.sidebar.checkbox("Select all COLOR", True):
+    selected_c = colors
+else:
+    selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
+
 df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
@@ -100,7 +110,7 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# STYLE TABLE
+# TABLE
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -115,7 +125,8 @@ st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 # MEASUREMENT POINT
 # =========================
 st.markdown("## Measurement point")
-char = st.selectbox("Select one Measurement point", stats["Characteristic"])
+
+char = st.selectbox("Select measurement point", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
@@ -126,22 +137,21 @@ values = data["Value"].dropna()
 # =========================
 c1, c2 = st.columns(2)
 
-# CONTROL CHART
 with c1:
-    fig, ax = plt.subplots(figsize=(6,4))
+    fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(values.values, marker="o")
     ax.axhline(spec["Mean"])
     ax.axhline(spec["USL"], linestyle="--")
     ax.axhline(spec["LSL"], linestyle="--")
     ax.set_title("Control Chart")
     ax.grid()
+    plt.tight_layout()
     st.pyplot(fig)
     st.markdown("Legend: Measurements | Mean | USL | LSL")
 
-# HISTOGRAM
 with c2:
-    fig, ax = plt.subplots(figsize=(6,4))
-    ax.hist(values, bins=20, density=True, alpha=0.7)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
@@ -149,20 +159,20 @@ with c2:
 
     ax.set_title("Histogram + Normal Curve")
     ax.grid()
+    plt.tight_layout()
     st.pyplot(fig)
-    st.markdown("Legend: Distribution | Normal curve")
+    st.markdown("Legend: Distribution + Normal fit")
 
 # =========================
 # ROW 2
 # =========================
 c3, c4 = st.columns(2)
 
-# I-MR
 with c3:
     if len(values) > 1:
         mr = values.diff().abs().dropna()
 
-        fig, ax = plt.subplots(2,1, figsize=(6,4), sharex=True)
+        fig, ax = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
 
         ax[0].plot(values.values)
         ax[0].set_title("I Chart")
@@ -172,21 +182,22 @@ with c3:
         ax[1].set_title("Moving Range")
         ax[1].grid()
 
+        plt.tight_layout()
         st.pyplot(fig)
-        st.markdown("Legend: Individual values | Moving variation")
+        st.markdown("Legend: Individual values | Moving range")
 
-# CAPABILITY
 with c4:
     fig, ax = plt.subplots()
     ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]])
     ax.axhline(1.33, linestyle="--")
-    ax.set_title("Capability (Cp / Cpk)")
+    ax.set_title("Capability")
     ax.grid()
+    plt.tight_layout()
     st.pyplot(fig)
     st.markdown(f"Legend: Cp={spec['Cp']:.2f} | Cpk={spec['Cpk']:.2f}")
 
 # =========================
-# GLOBAL SECTION
+# GLOBAL OVERVIEW
 # =========================
 st.markdown("## General overview for selected closure")
 
@@ -194,15 +205,16 @@ c5, c6 = st.columns(2)
 
 # BOXPLOT
 with c5:
-    fig, ax = plt.subplots(figsize=(8,4))
+    fig, ax = plt.subplots(figsize=(8, 4))
     df.boxplot(column="Value", by="Characteristic", ax=ax, grid=False)
     plt.xticks(rotation=45, ha="right")
-    ax.set_title("Boxplot per Characteristic")
     plt.suptitle("")
+    ax.set_title("Boxplot per Characteristic")
+    plt.tight_layout()
     st.pyplot(fig)
-    st.markdown("Legend: Distribution across all characteristics")
+    st.markdown("Legend: distribution per characteristic")
 
-# PARETO CLEAN
+# PARETO (FIXED CORECT)
 with c6:
     pareto = stats.copy()
     pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
@@ -210,19 +222,23 @@ with c6:
 
     pareto["CumPerc"] = 100 * pareto["OOS"].cumsum() / pareto["OOS"].sum()
 
-    fig, ax1 = plt.subplots(figsize=(8,4))
+    fig, ax1 = plt.subplots(figsize=(8, 4))
 
-    ax1.bar(range(len(pareto)), pareto["OOS"])
-    ax1.set_xticks(range(len(pareto)))
+    x = range(len(pareto))
+    ax1.bar(x, pareto["OOS"])
 
-    labels = [l if len(l)<20 else l[:17]+"..." for l in pareto["Characteristic"]]
+    labels = pareto["Characteristic"]
+    labels = [l if len(l) < 20 else l[:17] + "..." for l in labels]
+
+    ax1.set_xticks(x)
     ax1.set_xticklabels(labels, rotation=30, ha="right")
 
     ax2 = ax1.twinx()
-    ax2.plot(range(len(pareto)), pareto["CumPerc"], marker="o")
+    ax2.plot(x, pareto["CumPerc"], marker="o")
     ax2.axhline(80, linestyle="--")
 
     ax1.set_title("Pareto OOS")
+    ax1.grid(axis="y", linestyle="--", alpha=0.5)
 
     plt.tight_layout()
     st.pyplot(fig)
