@@ -14,9 +14,9 @@ st.title("SPC Dashboard")
 # LOAD DATA
 # =========================
 files = {
-    "Imaginary Closure": "Test-Measurements&Specs.xlsx",
-    "Imaginary Closure1": "Test-Measurements&Specs1.xlsx",
-    "Imaginary Closure2": "Test-Measurements&Specs2.xlsx"
+    "Dataset 0": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx"
 }
 
 selected_file = st.sidebar.selectbox("Select dataset", list(files.keys()))
@@ -42,7 +42,7 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS (NU MODIFICAM)
+# FILTERS (UNCHANGED)
 # =========================
 st.sidebar.header("Filters")
 
@@ -139,29 +139,34 @@ c1, c2 = st.columns(2)
 
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(values.values, marker="o")
-    ax.axhline(spec["Mean"])
-    ax.axhline(spec["USL"], linestyle="--")
-    ax.axhline(spec["LSL"], linestyle="--")
+
+    ax.plot(values.values, marker="o", color="#1f77b4")  # albastru
+    ax.axhline(spec["Mean"], color="green", linewidth=2)
+    ax.axhline(spec["USL"], color="red", linestyle="--", linewidth=2)
+    ax.axhline(spec["LSL"], color="red", linestyle="--", linewidth=2)
+
     ax.set_title("Control Chart")
     ax.grid()
     plt.tight_layout()
+
     st.pyplot(fig)
-    st.markdown("Legend: Measurements | Mean | USL | LSL")
+    st.markdown("Legend: 🔵 Measurements | 🟢 Mean | 🔴 USL/LSL")
 
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.hist(values, bins=20, density=True, alpha=0.6)
+
+    ax.hist(values, bins=20, density=True, alpha=0.6, color="#6baed6")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple", linewidth=2)
 
     ax.set_title("Histogram + Normal Curve")
     ax.grid()
     plt.tight_layout()
+
     st.pyplot(fig)
-    st.markdown("Legend: Distribution + Normal fit")
+    st.markdown("Legend: 🔵 Distribution | 🟣 Normal fit")
 
 # =========================
 # ROW 2
@@ -174,27 +179,30 @@ with c3:
 
         fig, ax = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
 
-        ax[0].plot(values.values)
+        ax[0].plot(values.values, color="#1f77b4")
         ax[0].set_title("I Chart")
         ax[0].grid()
 
-        ax[1].plot(mr.values)
+        ax[1].plot(mr.values, color="orange")
         ax[1].set_title("Moving Range")
         ax[1].grid()
 
         plt.tight_layout()
         st.pyplot(fig)
-        st.markdown("Legend: Individual values | Moving range")
+        st.markdown("Legend: 🔵 Values | 🟠 Variation")
 
 with c4:
     fig, ax = plt.subplots()
-    ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]])
-    ax.axhline(1.33, linestyle="--")
+
+    ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]], color=["#4daf4a", "#377eb8"])
+    ax.axhline(1.33, color="red", linestyle="--")
+
     ax.set_title("Capability")
     ax.grid()
     plt.tight_layout()
+
     st.pyplot(fig)
-    st.markdown(f"Legend: Cp={spec['Cp']:.2f} | Cpk={spec['Cpk']:.2f}")
+    st.markdown(f"Legend: 🟢 Cp | 🔵 Cpk | 🔴 Threshold")
 
 # =========================
 # GLOBAL OVERVIEW
@@ -203,18 +211,20 @@ st.markdown("## General overview for selected closure")
 
 c5, c6 = st.columns(2)
 
-# BOXPLOT
 with c5:
     fig, ax = plt.subplots(figsize=(8, 4))
+
     df.boxplot(column="Value", by="Characteristic", ax=ax, grid=False)
     plt.xticks(rotation=45, ha="right")
+
     plt.suptitle("")
     ax.set_title("Boxplot per Characteristic")
+
     plt.tight_layout()
     st.pyplot(fig)
     st.markdown("Legend: distribution per characteristic")
 
-# PARETO (FIXED CORECT)
+# PARETO COLORAT
 with c6:
     pareto = stats.copy()
     pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
@@ -225,7 +235,7 @@ with c6:
     fig, ax1 = plt.subplots(figsize=(8, 4))
 
     x = range(len(pareto))
-    ax1.bar(x, pareto["OOS"])
+    ax1.bar(x, pareto["OOS"], color="#4daf4a")  # verde
 
     labels = pareto["Characteristic"]
     labels = [l if len(l) < 20 else l[:17] + "..." for l in labels]
@@ -234,12 +244,12 @@ with c6:
     ax1.set_xticklabels(labels, rotation=30, ha="right")
 
     ax2 = ax1.twinx()
-    ax2.plot(x, pareto["CumPerc"], marker="o")
-    ax2.axhline(80, linestyle="--")
+    ax2.plot(x, pareto["CumPerc"], marker="o", color="orange", linewidth=2)
+    ax2.axhline(80, linestyle="--", color="red")
 
     ax1.set_title("Pareto OOS")
     ax1.grid(axis="y", linestyle="--", alpha=0.5)
 
     plt.tight_layout()
     st.pyplot(fig)
-    st.markdown("Legend: bars = OOS | line = cumulative % | dashed = 80%")
+    st.markdown("Legend: 🟢 OOS | 🟠 cumulative % | 🔴 80% threshold")
