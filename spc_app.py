@@ -18,7 +18,7 @@ st.title("SPC Dashboard")
 # =========================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
-TENANT_ID = st.secrets["TENANT_ID"]
+TENANT_ID = st.secrets["TENANT_ID"] 
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 
