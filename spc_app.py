@@ -14,9 +14,9 @@ st.title("SPC Dashboard")
 # LOAD DATA
 # =========================
 files = {
-    "Dataset 0": "Test-Measurements&Specs.xlsx",
-    "Dataset 1": "Test-Measurements&Specs1.xlsx",
-    "Dataset 2": "Test-Measurements&Specs2.xlsx"
+    "Imaginary Closure": "Test-Measurements&Specs.xlsx",
+    "Imaginary Closure1": "Test-Measurements&Specs1.xlsx",
+    "Imaginary Closure2": "Test-Measurements&Specs2.xlsx"
 }
 
 selected_file = st.sidebar.selectbox("Select dataset", list(files.keys()))
