@@ -6,6 +6,7 @@ from scipy.stats import norm
 from msal import ConfidentialClientApplication
 import requests
 from io import BytesIO
+import urllib.parse
 
 # =========================
 # CONFIG
@@ -14,23 +15,20 @@ st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# SECRETS (SAFE)
+# AZURE SECRETS
 # =========================
-CLIENT_ID = st.secrets.get("CLIENT_ID")
-CLIENT_SECRET = st.secrets.get("CLIENT_SECRET")
-TENANT_ID = st.secrets.get("TENANT_ID")
-SITE_ID = st.secrets.get("SITE_ID")
+CLIENT_ID = st.secrets["CLIENT_ID"]
+CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
+TENANT_ID = st.secrets["TENANT_ID"]
 
-if not all([CLIENT_ID, CLIENT_SECRET, TENANT_ID, SITE_ID]):
-    st.error("Missing secrets (CLIENT_ID / CLIENT_SECRET / TENANT_ID / SITE_ID)")
-    st.stop()
-
-# =========================
-# AUTH AZURE GRAPH
-# =========================
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
 
+SITE_ID = st.secrets["SITE_ID"]  # IMPORTANT: trebuie pus in secrets
+
+# =========================
+# AUTH
+# =========================
 app = ConfidentialClientApplication(
     CLIENT_ID,
     authority=AUTHORITY,
@@ -40,21 +38,30 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("Azure authentication failed")
+    st.error("Azure auth failed")
     st.write(token)
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# FILES (SharePoint)
+# FILES (GRAPH PATHS CORECTE)
 # =========================
-base_path = "Shared%20Documents/Measurements-test%20files"
+base_path = "Shared Documents/Measurements-test files"
+
+def graph_url(file):
+    safe_file = urllib.parse.quote(file)
+    safe_path = urllib.parse.quote(base_path)
+
+    return (
+        f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root:"
+        f"/{safe_path}/{safe_file}:/content"
+    )
 
 files = {
-    "Dataset 0": f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root:/{base_path}/Test-Measurements&Specs.xlsx:/content",
-    "Dataset 1": f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root:/{base_path}/Test-Measurements&Specs1.xlsx:/content",
-    "Dataset 2": f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root:/{base_path}/Test-Measurements&Specs2.xlsx:/content"
+    "Dataset 0": graph_url("Test-Measurements&Specs.xlsx"),
+    "Dataset 1": graph_url("Test-Measurements&Specs1.xlsx"),
+    "Dataset 2": graph_url("Test-Measurements&Specs2.xlsx"),
 }
 
 # =========================
@@ -63,22 +70,22 @@ files = {
 selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
 url = files[selected]
 
-r = requests.get(url, headers=headers)
+# =========================
+# DOWNLOAD
+# =========================
+res = requests.get(url, headers=headers)
 
-if r.status_code != 200:
+if res.status_code != 200:
     st.error("Failed loading SharePoint file")
-    st.write(r.text)
+    st.write(res.text)
     st.stop()
 
-excel = BytesIO(r.content)
+excel = BytesIO(res.content)
 
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
 df_specs = pd.read_excel(excel, sheet_name="Specs")
 
-# =========================
-# CLEAN
-# =========================
 df_meas.columns = df_meas.columns.str.strip()
 df_specs.columns = df_specs.columns.str.strip()
 
@@ -100,20 +107,33 @@ df = df_long.merge(df_specs, on="Characteristic", how="left")
 # =========================
 st.sidebar.header("Filters")
 
+min_d, max_d = df["DATE"].min(), df["DATE"].max()
+
 start_date, end_date = st.sidebar.date_input(
     "Date range",
-    value=(df["DATE"].min(), df["DATE"].max())
+    value=(min_d, max_d),
+    min_value=min_d,
+    max_value=max_d
 )
 
-df = df[df["DATE"].between(pd.to_datetime(start_date), pd.to_datetime(end_date))]
+df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
+        (df["DATE"] <= pd.to_datetime(end_date))]
 
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
-selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
+if st.sidebar.checkbox("Select all RAW MATERIAL", True):
+    selected_m = materials
+else:
+    selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
 
 df = df[df["RAW MATERIAL"].isin(selected_m)]
+
+if st.sidebar.checkbox("Select all COLOR", True):
+    selected_c = colors
+else:
+    selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
+
 df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
@@ -144,8 +164,26 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+
 # =========================
-# SELECT POINT
+# TABLE STYLE
+# =========================
+def style(df):
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold;text-decoration:underline"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold;text-decoration:underline"
+    return s
+
+st.subheader("SPC Summary")
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+
+# =========================
+# MEASUREMENT POINT
 # =========================
 st.markdown("## Measurement point")
 
@@ -160,11 +198,10 @@ values = data["Value"].dropna()
 # =========================
 c1, c2 = st.columns(2)
 
-# CONTROL CHART
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(values.values, marker="o", color="#1f77b4")
+    ax.plot(values.values, color="#1f77b4", marker="o", label="Values")
     ax.axhline(spec["Mean"], color="green", label="Mean")
     ax.axhline(spec["USL"], color="red", linestyle="--", label="USL")
     ax.axhline(spec["LSL"], color="orange", linestyle="--", label="LSL")
@@ -175,11 +212,10 @@ with c1:
 
     st.pyplot(fig)
 
-# HISTOGRAM
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.hist(values, bins=20, density=True, alpha=0.6, color="#6baed6")
+    ax.hist(values, bins=20, density=True, alpha=0.6, color="#6BAED6", edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
@@ -195,7 +231,6 @@ with c2:
 # =========================
 c3, c4 = st.columns(2)
 
-# I-MR
 with c3:
     if len(values) > 1:
         mr = values.diff().abs().dropna()
@@ -212,20 +247,51 @@ with c3:
 
         st.pyplot(fig)
 
-# CAPABILITY
 with c4:
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots()
 
     ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]], color=["#1f77b4", "#17becf"])
-    ax.axhline(1.33, linestyle="--", color="red")
+    ax.axhline(1.33, color="red", linestyle="--")
 
     ax.set_title("Capability")
-    ax.grid(axis="y", alpha=0.3)
+    ax.grid(alpha=0.3)
 
     st.pyplot(fig)
 
 # =========================
-# GENERAL TEXT ONLY
+# GLOBAL OVERVIEW
 # =========================
-st.markdown("## General overview for selected closure")
-st.info("Use filters and select measurement point to analyze SPC behavior.")
+st.markdown("## General overview")
+
+c5, c6 = st.columns(2)
+
+with c5:
+    fig, ax = plt.subplots(figsize=(7, 4))
+    df.boxplot(column="Value", by="Characteristic", ax=ax)
+    plt.xticks(rotation=30, ha="right")
+    plt.suptitle("")
+    ax.set_title("Boxplot per Characteristic")
+    st.pyplot(fig)
+
+with c6:
+    pareto = stats.copy()
+    pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
+    pareto = pareto.sort_values("OOS", ascending=False).head(10)
+
+    pareto["Cum"] = 100 * pareto["OOS"].cumsum() / max(pareto["OOS"].sum(), 1)
+
+    fig, ax1 = plt.subplots(figsize=(7, 4))
+
+    x = range(len(pareto))
+    ax1.bar(x, pareto["OOS"], color="#1f77b4")
+
+    ax2 = ax1.twinx()
+    ax2.plot(x, pareto["Cum"], color="red", marker="o")
+    ax2.axhline(80, linestyle="--")
+
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(pareto["Characteristic"], rotation=25, ha="right")
+
+    ax1.set_title("Pareto OOS")
+
+    st.pyplot(fig)
