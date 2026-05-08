@@ -19,7 +19,9 @@ st.title("SPC Dashboard")
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
-SITE_ID = st.secrets["SITE_ID"]
+
+# 🔥 SITE CORECT (actualizat)
+SITE_ID = "sigitglobal.sharepoint.com,GLB-Quality-Alpla_Hefei"
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
@@ -43,7 +45,7 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# GET DRIVES (AUTO)
+# GET DRIVE AUTOMATIC
 # =========================
 @st.cache_data
 def get_drive():
@@ -55,8 +57,7 @@ def get_drive():
         st.write(res.text)
         st.stop()
 
-    drives = res.json()["value"]
-    return drives[0]  # folosim primul drive (de obicei Documents)
+    return res.json()["value"][0]  # primul drive
 
 drive = get_drive()
 DRIVE_ID = drive["id"]
@@ -64,9 +65,9 @@ DRIVE_ID = drive["id"]
 st.sidebar.success(f"Drive: {drive['name']}")
 
 # =========================
-# FILE SEARCH (NO PATHS)
+# FILE SEARCH (ROBUST)
 # =========================
-def get_file(file_name):
+def get_file_id(file_name):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/search(q='{file_name}')"
     res = requests.get(url, headers=headers)
 
@@ -95,7 +96,7 @@ def download_file(file_id):
     return BytesIO(res.content)
 
 # =========================
-# FILES
+# FILES (ACTUALIZATE)
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -107,9 +108,9 @@ selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
 file_name = files[selected]
 
 # =========================
-# LOAD FILE (SAFE)
+# LOAD FILE
 # =========================
-file_id = get_file(file_name)
+file_id = get_file_id(file_name)
 excel = download_file(file_id)
 
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
