@@ -20,7 +20,6 @@ CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
 SITE_ID = st.secrets["SITE_ID"]
-DRIVE_ID = st.secrets["DRIVE_ID"]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
@@ -44,7 +43,30 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# SHAREPOINT FILE ACCESS (FIXED)
+# GET DRIVES (AUTO DISCOVERY)
+# =========================
+@st.cache_data
+def get_drives():
+    url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Failed to fetch drives")
+        st.write(res.text)
+        st.stop()
+
+    return res.json()["value"]
+
+drives = get_drives()
+
+# alegem automat primul drive (de obicei Documents)
+drive = drives[0]
+DRIVE_ID = drive["id"]
+
+st.sidebar.success(f"Using Drive: {drive['name']}")
+
+# =========================
+# FILE PATH
 # =========================
 base_folder = "/Measurements-test files"
 
@@ -124,15 +146,13 @@ df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_m = materials if st.sidebar.checkbox("Select all RAW MATERIAL", True) else st.sidebar.multiselect(
-    "RAW MATERIAL", materials, default=materials
-)
-df = df[df["RAW MATERIAL"].isin(selected_m)]
+selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
+selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
 
-selected_c = colors if st.sidebar.checkbox("Select all COLOR", True) else st.sidebar.multiselect(
-    "COLOR", colors, default=colors
-)
-df = df[df["COLOR"].isin(selected_c)]
+df = df[
+    (df["RAW MATERIAL"].isin(selected_m)) &
+    (df["COLOR"].isin(selected_c))
+]
 
 # =========================
 # LIMITS
@@ -171,23 +191,17 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# STYLE TABLE
+# TABLE
 # =========================
-def style(df):
-    s = pd.DataFrame("", index=df.index, columns=df.columns)
-    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
-    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
-    return s
-
 st.subheader("SPC Summary")
-st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+st.dataframe(stats, use_container_width=True)
 
 # =========================
 # MEASUREMENT VIEW
 # =========================
 st.markdown("## Measurement point")
 
-char = st.selectbox("Select measurement point", stats["Characteristic"])
+char = st.selectbox("Select characteristic", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
