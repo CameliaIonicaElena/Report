@@ -43,17 +43,10 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# GET DRIVES (AUTO DISCOVERY)
+# GET DRIVES (AUTO)
 # =========================
-st.write("DRIVE ID:", DRIVE_ID)
-
-url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
-res = requests.get(url, headers=headers)
-
-st.write(res.status_code)
-st.json(res.json()) 
 @st.cache_data
-def get_drives():
+def get_drive():
     url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives"
     res = requests.get(url, headers=headers)
 
@@ -62,57 +55,63 @@ def get_drives():
         st.write(res.text)
         st.stop()
 
-    return res.json()["value"]
+    drives = res.json()["value"]
+    return drives[0]  # folosim primul drive (de obicei Documents)
 
-drives = get_drives()
-
-# alegem automat primul drive (de obicei Documents)
-drive = drives[0]
+drive = get_drive()
 DRIVE_ID = drive["id"]
 
-st.sidebar.success(f"Using Drive: {drive['name']}")
+st.sidebar.success(f"Drive: {drive['name']}")
 
 # =========================
-# FILE PATH
+# FILE SEARCH (NO PATHS)
 # =========================
-base_folder = "/Measurements-test files"
+def get_file(file_name):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/search(q='{file_name}')"
+    res = requests.get(url, headers=headers)
 
-def graph_url(file_name):
-    file_path = f"{base_folder}/{file_name}"
+    if res.status_code != 200:
+        st.error("Search failed")
+        st.write(res.text)
+        st.stop()
 
-    return (
-        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}"
-        f"/root:{file_path}:/content"
-    )
+    items = res.json().get("value", [])
 
+    if not items:
+        st.error(f"File not found: {file_name}")
+        st.stop()
+
+    return items[0]["id"]
+
+def download_file(file_id):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Download failed")
+        st.write(res.text)
+        st.stop()
+
+    return BytesIO(res.content)
+
+# =========================
+# FILES
+# =========================
 files = {
-    "Dataset 0": graph_url("Test-Measurements&Specs.xlsx"),
-    "Dataset 1": graph_url("Test-Measurements&Specs1.xlsx"),
-    "Dataset 2": graph_url("Test-Measurements&Specs2.xlsx"),
+    "Dataset 0": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx",
 }
 
-# =========================
-# SELECT FILE
-# =========================
 selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
-url = files[selected]
+file_name = files[selected]
 
 # =========================
-# DOWNLOAD FILE
+# LOAD FILE (SAFE)
 # =========================
-res = requests.get(url, headers=headers)
+file_id = get_file(file_name)
+excel = download_file(file_id)
 
-if res.status_code != 200:
-    st.error("Failed loading SharePoint file")
-    st.write(res.status_code)
-    st.write(res.text)
-    st.stop()
-
-excel = BytesIO(res.content)
-
-# =========================
-# LOAD DATA
-# =========================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
 df_specs = pd.read_excel(excel, sheet_name="Specs")
@@ -204,7 +203,7 @@ st.subheader("SPC Summary")
 st.dataframe(stats, use_container_width=True)
 
 # =========================
-# MEASUREMENT VIEW
+# DETAIL VIEW
 # =========================
 st.markdown("## Measurement point")
 
