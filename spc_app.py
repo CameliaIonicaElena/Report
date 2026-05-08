@@ -6,7 +6,6 @@ from scipy.stats import norm
 from msal import ConfidentialClientApplication
 import requests
 from io import BytesIO
-import urllib.parse
 
 # =========================
 # CONFIG
@@ -21,6 +20,7 @@ CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
 SITE_ID = st.secrets["SITE_ID"]
+DRIVE_ID = st.secrets["DRIVE_ID"]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
@@ -44,17 +44,16 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# SHAREPOINT PATH
+# SHAREPOINT FILE ACCESS (FIXED)
 # =========================
-base_path = "Shared Documents/Measurements-test files"
+base_folder = "/Measurements-test files"
 
-def graph_url(file):
-    file_enc = urllib.parse.quote(file)
-    path_enc = urllib.parse.quote(base_path)
+def graph_url(file_name):
+    file_path = f"{base_folder}/{file_name}"
 
     return (
-        f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root:"
-        f"/{path_enc}/{file_enc}:/content"
+        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}"
+        f"/root:{file_path}:/content"
     )
 
 files = {
@@ -76,11 +75,15 @@ res = requests.get(url, headers=headers)
 
 if res.status_code != 200:
     st.error("Failed loading SharePoint file")
+    st.write(res.status_code)
     st.write(res.text)
     st.stop()
 
 excel = BytesIO(res.content)
 
+# =========================
+# LOAD DATA
+# =========================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
 df_specs = pd.read_excel(excel, sheet_name="Specs")
@@ -102,7 +105,7 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS (UNCHANGED)
+# FILTERS
 # =========================
 st.sidebar.header("Filters")
 
@@ -121,10 +124,14 @@ df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_m = materials if st.sidebar.checkbox("Select all RAW MATERIAL", True) else st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
+selected_m = materials if st.sidebar.checkbox("Select all RAW MATERIAL", True) else st.sidebar.multiselect(
+    "RAW MATERIAL", materials, default=materials
+)
 df = df[df["RAW MATERIAL"].isin(selected_m)]
 
-selected_c = colors if st.sidebar.checkbox("Select all COLOR", True) else st.sidebar.multiselect("COLOR", colors, default=colors)
+selected_c = colors if st.sidebar.checkbox("Select all COLOR", True) else st.sidebar.multiselect(
+    "COLOR", colors, default=colors
+)
 df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
@@ -164,19 +171,19 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# TABLE STYLE
+# STYLE TABLE
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
-    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold;text-decoration:underline"
-    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold;text-decoration:underline"
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
     return s
 
 st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# MEASUREMENT POINT
+# MEASUREMENT VIEW
 # =========================
 st.markdown("## Measurement point")
 
@@ -187,103 +194,42 @@ spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# ROW 1
+# CHARTS
 # =========================
 c1, c2 = st.columns(2)
 
 with c1:
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots()
 
-    ax.plot(values.values, marker="o", color="#1f77b4")
-    ax.axhline(spec["Mean"], color="green")
-    ax.axhline(spec["USL"], color="red", linestyle="--")
-    ax.axhline(spec["LSL"], color="orange", linestyle="--")
+    ax.plot(values.values, marker="o")
+    ax.axhline(spec["Mean"])
+    ax.axhline(spec["USL"], linestyle="--")
+    ax.axhline(spec["LSL"], linestyle="--")
 
     ax.set_title("Control Chart")
-    ax.grid(alpha=0.3)
+    ax.grid()
 
     st.pyplot(fig)
 
 with c2:
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots()
 
-    ax.hist(values, bins=20, density=True, alpha=0.6, color="#6BAED6")
+    ax.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
-    ax.set_title("Histogram + Normal Curve")
-    ax.grid(alpha=0.3)
-
-    st.pyplot(fig)
-
-# =========================
-# ROW 2
-# =========================
-c3, c4 = st.columns(2)
-
-with c3:
-    if len(values) > 1:
-        mr = values.diff().abs().dropna()
-
-        fig, ax = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
-
-        ax[0].plot(values.values, color="#1f77b4")
-        ax[0].set_title("I Chart")
-        ax[0].grid(alpha=0.3)
-
-        ax[1].plot(mr.values, color="#ff7f0e")
-        ax[1].set_title("Moving Range")
-        ax[1].grid(alpha=0.3)
-
-        st.pyplot(fig)
-
-with c4:
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]], color=["#1f77b4", "#17becf"])
-    ax.axhline(1.33, color="red", linestyle="--")
-
-    ax.set_title("Capability")
-    ax.grid(alpha=0.3)
+    ax.set_title("Histogram")
 
     st.pyplot(fig)
 
 # =========================
-# GLOBAL OVERVIEW
+# CAPABILITY
 # =========================
-st.markdown("## General overview")
+st.subheader("Capability")
 
-c5, c6 = st.columns(2)
-
-with c5:
-    fig, ax = plt.subplots(figsize=(7, 4))
-    df.boxplot(column="Value", by="Characteristic", ax=ax)
-    plt.xticks(rotation=30, ha="right")
-    plt.suptitle("")
-    ax.set_title("Boxplot per Characteristic")
-    st.pyplot(fig)
-
-with c6:
-    pareto = stats.copy()
-    pareto["OOS"] = pareto["Above OOS"] + pareto["Below OOS"]
-    pareto = pareto.sort_values("OOS", ascending=False).head(10)
-
-    pareto["Cum"] = 100 * pareto["OOS"].cumsum() / max(pareto["OOS"].sum(), 1)
-
-    fig, ax1 = plt.subplots(figsize=(7, 4))
-
-    x = range(len(pareto))
-    ax1.bar(x, pareto["OOS"], color="#1f77b4")
-
-    ax2 = ax1.twinx()
-    ax2.plot(x, pareto["Cum"], color="red", marker="o")
-    ax2.axhline(80, linestyle="--")
-
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(pareto["Characteristic"], rotation=25, ha="right")
-
-    ax1.set_title("Pareto OOS")
-
-    st.pyplot(fig)
+fig, ax = plt.subplots()
+ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]])
+ax.axhline(1.33, linestyle="--")
+st.pyplot(fig)
