@@ -9,13 +9,13 @@ from io import BytesIO
 import urllib.parse
 
 # =========================
-# CONFIG
+# APP CONFIG
 # =========================
 st.set_page_config(layout="wide")
-st.title("SPC Dashboard")
+st.title("📊 SPC Dashboard")
 
 # =========================
-# AZURE AUTH
+# AUTH
 # =========================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -34,8 +34,7 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("Azure auth failed")
-    st.write(token)
+    st.error("❌ Azure authentication failed")
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
@@ -60,10 +59,13 @@ files = {
 selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
 url = files[selected]
 
+# =========================
+# DOWNLOAD
+# =========================
 res = requests.get(url, headers=headers)
 
 if res.status_code != 200:
-    st.error("Failed loading SharePoint file")
+    st.error("❌ Failed loading SharePoint file")
     st.write(res.text)
     st.stop()
 
@@ -93,34 +95,38 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS
+# FILTERS (MODERN UI)
 # =========================
-st.sidebar.header("Filters")
+st.sidebar.header("🎛️ Filters")
 
 min_d, max_d = df["DATE"].min(), df["DATE"].max()
 
-start_date, end_date = st.sidebar.date_input(
+start, end = st.sidebar.date_input(
     "Date range",
     value=(min_d, max_d),
     min_value=min_d,
     max_value=max_d
 )
 
-df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
-        (df["DATE"] <= pd.to_datetime(end_date))]
+df = df[(df["DATE"] >= pd.to_datetime(start)) &
+        (df["DATE"] <= pd.to_datetime(end))]
 
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-if st.sidebar.checkbox("Select all RAW MATERIAL", True):
-    selected_m = materials
-else:
-    selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
+col1, col2 = st.sidebar.columns(2)
 
-if st.sidebar.checkbox("Select all COLOR", True):
-    selected_c = colors
-else:
-    selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
+with col1:
+    if st.checkbox("All RM", True):
+        selected_m = materials
+    else:
+        selected_m = st.multiselect("Raw Material", materials, default=materials)
+
+with col2:
+    if st.checkbox("All COLOR", True):
+        selected_c = colors
+    else:
+        selected_c = st.multiselect("Color", colors, default=colors)
 
 df = df[
     df["RAW MATERIAL"].isin(selected_m) &
@@ -157,15 +163,18 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
-st.subheader("SPC Summary")
-st.dataframe(stats, use_container_width=True)
+# =========================
+# TABLE
+# =========================
+st.subheader("📋 SPC Summary")
+st.dataframe(stats, use_container_width=True, height=350)
 
 # =========================
-# SELECT POINT
+# SELECT CHARACTERISTIC
 # =========================
-st.markdown("## Measurement point")
+st.markdown("## 📌 Measurement Point")
 
-char = st.selectbox("Select measurement point", stats["Characteristic"])
+char = st.selectbox("Select characteristic", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
@@ -179,12 +188,12 @@ c1, c2 = st.columns(2)
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(values.values, color="#1f77b4", marker="o", label="Values")
-    ax.axhline(spec["Mean"], color="green", label="Mean")
-    ax.axhline(spec["USL"], color="red", linestyle="--", label="USL")
-    ax.axhline(spec["LSL"], color="orange", linestyle="--", label="LSL")
+    ax.plot(values.values, marker="o", color="#1f77b4", linewidth=1.5, label="Values")
+    ax.axhline(spec["Mean"], color="green", linewidth=2, label="Mean")
+    ax.axhline(spec["USL"], color="red", linestyle="--", linewidth=2, label="USL")
+    ax.axhline(spec["LSL"], color="orange", linestyle="--", linewidth=2, label="LSL")
 
-    ax.set_title("Control Chart")
+    ax.set_title("Control Chart", fontweight="bold")
     ax.grid(alpha=0.3)
     ax.legend()
 
@@ -198,42 +207,27 @@ with c2:
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()),
+                color="purple", linewidth=2)
 
-    ax.set_title("Histogram + Normal Curve")
+    ax.set_title("Histogram + Normal Curve", fontweight="bold")
     ax.grid(alpha=0.3)
 
     st.pyplot(fig)
 
 # =========================
-# ROW 2 - I/MR + CAPABILITY
+# ROW 2 - CAPABILITY
 # =========================
-c3, c4 = st.columns(2)
+st.subheader("📐 Capability")
 
-with c3:
-    if len(values) > 1:
-        mr = values.diff().abs().dropna()
+fig, ax = plt.subplots(figsize=(5, 3))
 
-        fig, ax = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
+ax.bar(["Cp", "Cpk"],
+       [spec["Cp"], spec["Cpk"]],
+       color=["#1f77b4", "#17becf"])
 
-        ax[0].plot(values.values, color="#1f77b4", marker="o")
-        ax[0].set_title("I Chart")
-        ax[0].grid(alpha=0.3)
+ax.axhline(1.33, color="red", linestyle="--", linewidth=2)
+ax.set_title("Process Capability", fontweight="bold")
+ax.grid(alpha=0.3)
 
-        ax[1].plot(mr.values, color="#ff7f0e", marker="o")
-        ax[1].set_title("Moving Range")
-        ax[1].grid(alpha=0.3)
-
-        st.pyplot(fig)
-
-with c4:
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]],
-           color=["#1f77b4", "#17becf"])
-
-    ax.axhline(1.33, color="red", linestyle="--")
-    ax.set_title("Capability")
-    ax.grid(alpha=0.3)
-
-    st.pyplot(fig)
+st.pyplot(fig)
