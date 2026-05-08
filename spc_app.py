@@ -8,27 +8,23 @@ import requests
 from io import BytesIO
 
 # =========================
-# APP CONFIG
+# APP
 # =========================
 st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
 # =========================
-# AZURE SECRETS
+# AUTH
 # =========================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
 
-# SharePoint site (CORECT FORMAT)
-SITE_ID = "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:"
-
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
 
-# =========================
-# AUTH
-# =========================
+SITE_ID = "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:"
+
 app = ConfidentialClientApplication(
     CLIENT_ID,
     authority=AUTHORITY,
@@ -38,14 +34,13 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("Azure authentication failed")
-    st.write(token)
+    st.error("Auth failed")
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# GET DRIVE
+# GET DRIVES (FIXED SELECTION)
 # =========================
 @st.cache_data
 def get_drive():
@@ -53,11 +48,17 @@ def get_drive():
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Failed to get drive")
-        st.write(res.text)
+        st.error(res.text)
         st.stop()
 
-    return res.json()["value"][0]
+    drives = res.json()["value"]
+
+    # 🔥 select correct document library
+    for d in drives:
+        if "Documents" in d["name"] or "Shared" in d["name"]:
+            return d
+
+    return drives[0]
 
 drive = get_drive()
 DRIVE_ID = drive["id"]
@@ -65,17 +66,17 @@ DRIVE_ID = drive["id"]
 st.sidebar.success(f"Drive: {drive['name']}")
 
 # =========================
-# LIST FILES (FIXED FOLDER PATH)
+# LIST FOLDER CONTENT (CORRECT PATH)
 # =========================
+FOLDER_PATH = "Measurements-test files"
+
 @st.cache_data
 def list_files():
-    folder_path = "Measurements-test files"
-
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{folder_path}:/children"
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{FOLDER_PATH}:/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Failed to list folder")
+        st.error("Folder not found or no access")
         st.write(res.text)
         st.stop()
 
@@ -84,7 +85,7 @@ def list_files():
 files_in_folder = list_files()
 
 # DEBUG (optional)
-# st.write(files_in_folder)
+# st.write([f["name"] for f in files_in_folder])
 
 # =========================
 # GET FILE ID
@@ -107,8 +108,7 @@ def download_file(file_id):
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Download failed")
-        st.write(res.text)
+        st.error(res.text)
         st.stop()
 
     return BytesIO(res.content)
@@ -156,13 +156,13 @@ df = df_long.merge(df_specs, on="Characteristic", how="left")
 # =========================
 st.sidebar.header("Filters")
 
-start_date, end_date = st.sidebar.date_input(
+start, end = st.sidebar.date_input(
     "Date range",
     value=(df["DATE"].min(), df["DATE"].max())
 )
 
-df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
-        (df["DATE"] <= pd.to_datetime(end_date))]
+df = df[(df["DATE"] >= pd.to_datetime(start)) &
+        (df["DATE"] <= pd.to_datetime(end))]
 
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
@@ -225,7 +225,6 @@ with c1:
     ax.axhline(spec["Mean"])
     ax.axhline(spec["USL"], linestyle="--")
     ax.axhline(spec["LSL"], linestyle="--")
-    ax.set_title("Control Chart")
     st.pyplot(fig)
 
 with c2:
@@ -236,7 +235,6 @@ with c2:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
-    ax.set_title("Histogram")
     st.pyplot(fig)
 
 # =========================
