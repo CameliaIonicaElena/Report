@@ -8,7 +8,7 @@ import requests
 from io import BytesIO
 
 # =========================
-# APP CONFIG
+# APP
 # =========================
 st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
@@ -74,7 +74,6 @@ def list_files():
 
     if res.status_code != 200:
         st.error("Folder not found")
-        st.write(res.text)
         st.stop()
 
     return res.json().get("value", [])
@@ -87,7 +86,6 @@ def get_file_id(file_name):
             return f["id"]
 
     st.error(f"File not found: {file_name}")
-    st.write([f["name"] for f in files_in_folder])
     st.stop()
 
 def download_file(file_id):
@@ -101,7 +99,7 @@ def download_file(file_id):
     return BytesIO(res.content)
 
 # =========================
-# SELECT FILE
+# FILE SELECT
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -114,6 +112,30 @@ file_name = files[selected]
 
 file_id = get_file_id(file_name)
 excel = download_file(file_id)
+
+# =========================
+# SIDEBAR INFO PANEL (DYNAMIC)
+# =========================
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Connection status")
+
+st.sidebar.success("Connected")
+
+st.sidebar.markdown(
+    f"""
+**SharePoint Site**  
+GLB-Quality-Alpla_Hefei  
+
+**Folder**  
+{FOLDER_PATH}  
+
+**Dataset**  
+{selected}  
+
+**File**  
+{file_name}
+"""
+)
 
 # =========================
 # LOAD DATA
@@ -139,7 +161,7 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS (MODERN UI)
+# FILTERS
 # =========================
 st.sidebar.header("Filters")
 
@@ -205,9 +227,6 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
-# =========================
-# OOS
-# =========================
 above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
 below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 
@@ -215,7 +234,7 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# PROCESS CAPABILITY LABEL
+# PROCESS CAPABILITY
 # =========================
 def capability_label(cpk):
     if pd.isna(cpk):
@@ -237,8 +256,8 @@ stats["Process Capability"] = stats["Cpk"].apply(capability_label)
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    for col in ["Above OOS", "Below OOS"]:
-        s.loc[df[col] > 0, col] = "color:red;font-weight:bold"
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
 
     s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
     s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:#1f77b4;font-weight:bold"
@@ -251,7 +270,7 @@ st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# SELECT CHARACTERISTIC
+# CHARTS
 # =========================
 st.markdown("Measurement point")
 
@@ -261,9 +280,6 @@ data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
-# =========================
-# CONTROL CHART
-# =========================
 c1, c2 = st.columns(2)
 
 with c1:
@@ -279,9 +295,6 @@ with c1:
 
     st.pyplot(fig)
 
-# =========================
-# HISTOGRAM
-# =========================
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
 
