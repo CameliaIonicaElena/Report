@@ -68,15 +68,14 @@ st.sidebar.success(f"Drive: {drive['name']}")
 # =========================
 @st.cache_data
 def list_files():
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/Measurements-test files:/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Failed to list files")
-        st.write(res.text)
+        st.error(res.text)
         st.stop()
 
-    return res.json()["value"]
+    return res.json().get("value", [])
 
 files_in_drive = list_files()
 
