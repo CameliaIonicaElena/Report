@@ -58,13 +58,13 @@ headers = {
 # =========================
 files = {
     "Dataset 0":
-    "https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:/sites/GQMSpouts131:/drive/root:/Shared Documents/Measurements-test files/Test-Measurements&Specs.xlsx:/content",
+    "https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:/sites/GQMSpouts131:/drive/root:/Shared%20Documents/Measurements-test%20files/Test-Measurements%26Specs.xlsx:/content",
 
     "Dataset 1":
-    "https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:/sites/GQMSpouts131:/drive/root:/Shared Documents/Measurements-test files/Test-Measurements&Specs1.xlsx:/content",
+    "https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:/sites/GQMSpouts131:/drive/root:/Shared%20Documents/Measurements-test%20files/Test-Measurements%26Specs1.xlsx:/content",
 
     "Dataset 2":
-    "https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:/sites/GQMSpouts131:/drive/root:/Shared Documents/Measurements-test files/Test-Measurements&Specs2.xlsx:/content"
+    "https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:/sites/GQMSpouts131:/drive/root:/Shared%20Documents/Measurements-test%20files/Test-Measurements%26Specs2.xlsx:/content"
 }
 
 # =========================
