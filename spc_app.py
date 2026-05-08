@@ -72,7 +72,15 @@ def download_file(file_id):
         st.stop()
 
     return BytesIO(res.content)
+def list_all_files():
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
+    res = requests.get(url, headers=headers)
 
+    if res.status_code != 200:
+        st.error(res.text)
+        st.stop()
+
+    return res.json()["value"]
 # =========================
 # FILES (EXACT CE AI DAT TU)
 # =========================
