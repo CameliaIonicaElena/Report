@@ -102,9 +102,9 @@ def download_file(file_id):
 # FILE SELECT
 # =========================
 files = {
-    "Dataset 0": "Test-Measurements&Specs.xlsx",
-    "Dataset 1": "Test-Measurements&Specs1.xlsx",
-    "Dataset 2": "Test-Measurements&Specs2.xlsx",
+    "Cap": "Test-Measurements&Specs.xlsx",
+    "Flange": "Test-Measurements&Specs1.xlsx",
+    "Cutting Ring": "Test-Measurements&Specs2.xlsx",
 }
 
 selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
