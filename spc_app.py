@@ -8,11 +8,14 @@ import requests
 from io import BytesIO
 
 # =========================
-# CONFIG
+# APP CONFIG
 # =========================
 st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
 
+# =========================
+# AZURE SECRETS
+# =========================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
@@ -34,7 +37,8 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("Auth failed")
+    st.error("Azure authentication failed")
+    st.write(token)
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
@@ -42,47 +46,69 @@ headers = {"Authorization": f"Bearer {token['access_token']}"}
 # =========================
 # GET DRIVE
 # =========================
-drive_url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives"
-drive = requests.get(drive_url, headers=headers).json()["value"][0]
+@st.cache_data
+def get_drive():
+    url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Failed to fetch drives")
+        st.write(res.text)
+        st.stop()
+
+    return res.json()["value"][0]
+
+drive = get_drive()
 DRIVE_ID = drive["id"]
 
 st.sidebar.success(f"Drive: {drive['name']}")
 
 # =========================
-# FILE SEARCH (IMPORTANT FIX)
+# LIST FILES (SAFE METHOD)
 # =========================
-def get_file_id(file_name):
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/search(q='{file_name}')"
-    res = requests.get(url, headers=headers).json()
+@st.cache_data
+def list_files():
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
+    res = requests.get(url, headers=headers)
 
-    items = res.get("value", [])
-
-    if not items:
-        st.error(f"File not found: {file_name}")
+    if res.status_code != 200:
+        st.error("Failed to list files")
+        st.write(res.text)
         st.stop()
 
-    return items[0]["id"]
+    return res.json()["value"]
 
+files_in_drive = list_files()
+
+# =========================
+# GET FILE ID (EXACT MATCH)
+# =========================
+def get_file_id(file_name):
+    for f in files_in_drive:
+        if f["name"] == file_name:
+            return f["id"]
+
+    st.error(f"File not found: {file_name}")
+    st.write("Available files:")
+    st.write([f["name"] for f in files_in_drive])
+    st.stop()
+
+# =========================
+# DOWNLOAD FILE
+# =========================
 def download_file(file_id):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error(res.text)
+        st.error("Failed to download file")
+        st.write(res.text)
         st.stop()
 
     return BytesIO(res.content)
-def list_all_files():
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
-    res = requests.get(url, headers=headers)
 
-    if res.status_code != 200:
-        st.error(res.text)
-        st.stop()
-
-    return res.json()["value"]
 # =========================
-# FILES (EXACT CE AI DAT TU)
+# FILE SELECTION
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -124,20 +150,23 @@ df = df_long.merge(df_specs, on="Characteristic", how="left")
 # =========================
 st.sidebar.header("Filters")
 
-start, end = st.sidebar.date_input(
+start_date, end_date = st.sidebar.date_input(
     "Date range",
     value=(df["DATE"].min(), df["DATE"].max())
 )
 
-df = df[(df["DATE"] >= pd.to_datetime(start)) &
-        (df["DATE"] <= pd.to_datetime(end))]
+df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
+        (df["DATE"] <= pd.to_datetime(end_date))]
 
-materials = df["RAW MATERIAL"].dropna().unique()
-colors = df["COLOR"].dropna().unique()
+materials = sorted(df["RAW MATERIAL"].dropna().unique())
+colors = sorted(df["COLOR"].dropna().unique())
+
+selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
+selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
 
 df = df[
-    df["RAW MATERIAL"].isin(materials) &
-    df["COLOR"].isin(colors)
+    df["RAW MATERIAL"].isin(selected_m) &
+    df["COLOR"].isin(selected_c)
 ]
 
 # =========================
@@ -190,6 +219,7 @@ with c1:
     ax.axhline(spec["Mean"])
     ax.axhline(spec["USL"], linestyle="--")
     ax.axhline(spec["LSL"], linestyle="--")
+    ax.set_title("Control Chart")
     st.pyplot(fig)
 
 with c2:
@@ -200,4 +230,15 @@ with c2:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
+    ax.set_title("Histogram")
     st.pyplot(fig)
+
+# =========================
+# CAPABILITY
+# =========================
+st.subheader("Capability")
+
+fig, ax = plt.subplots()
+ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]])
+ax.axhline(1.33, linestyle="--")
+st.pyplot(fig)
