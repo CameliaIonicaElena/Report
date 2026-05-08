@@ -6,10 +6,9 @@ from scipy.stats import norm
 from msal import ConfidentialClientApplication
 import requests
 from io import BytesIO
-import urllib.parse
 
 # =========================
-# APP CONFIG
+# APP
 # =========================
 st.set_page_config(layout="wide")
 st.title("📊 SPC Dashboard")
@@ -20,10 +19,11 @@ st.title("📊 SPC Dashboard")
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
-SITE_ID = st.secrets["SITE_ID"]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
+
+SITE_ID = "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:"
 
 app = ConfidentialClientApplication(
     CLIENT_ID,
@@ -34,42 +34,91 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("❌ Azure authentication failed")
+    st.error("❌ Auth failed")
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# FILES (GRAPH)
+# GET DRIVES
 # =========================
-base_path = "Shared Documents/Measurements-test files"
+@st.cache_data
+def get_drive():
+    url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives"
+    res = requests.get(url, headers=headers)
 
-def graph_url(file):
-    return (
-        f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root:"
-        f"/{urllib.parse.quote(base_path)}/{urllib.parse.quote(file)}:/content"
-    )
+    if res.status_code != 200:
+        st.error(res.text)
+        st.stop()
 
+    drives = res.json()["value"]
+
+    for d in drives:
+        if "Documents" in d["name"] or "Shared" in d["name"]:
+            return d
+
+    return drives[0]
+
+drive = get_drive()
+DRIVE_ID = drive["id"]
+
+st.sidebar.success(f"Drive: {drive['name']}")
+
+# =========================
+# LIST FILES
+# =========================
+FOLDER_PATH = "Measurements-test files"
+
+@st.cache_data
+def list_files():
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{FOLDER_PATH}:/children"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Folder not found")
+        st.write(res.text)
+        st.stop()
+
+    return res.json().get("value", [])
+
+files_in_folder = list_files()
+
+# =========================
+# GET FILE
+# =========================
+def get_file_id(file_name):
+    for f in files_in_folder:
+        if f["name"] == file_name:
+            return f["id"]
+
+    st.error(f"File not found: {file_name}")
+    st.write([f["name"] for f in files_in_folder])
+    st.stop()
+
+def download_file(file_id):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error(res.text)
+        st.stop()
+
+    return BytesIO(res.content)
+
+# =========================
+# FILES
+# =========================
 files = {
-    "Dataset 0": graph_url("Test-Measurements&Specs.xlsx"),
-    "Dataset 1": graph_url("Test-Measurements&Specs1.xlsx"),
-    "Dataset 2": graph_url("Test-Measurements&Specs2.xlsx"),
+    "Dataset 0": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx",
 }
 
 selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
-url = files[selected]
+file_name = files[selected]
 
-# =========================
-# DOWNLOAD
-# =========================
-res = requests.get(url, headers=headers)
-
-if res.status_code != 200:
-    st.error("❌ Failed loading SharePoint file")
-    st.write(res.text)
-    st.stop()
-
-excel = BytesIO(res.content)
+file_id = get_file_id(file_name)
+excel = download_file(file_id)
 
 # =========================
 # LOAD DATA
@@ -99,13 +148,11 @@ df = df_long.merge(df_specs, on="Characteristic", how="left")
 # =========================
 st.sidebar.header("🎛️ Filters")
 
-min_d, max_d = df["DATE"].min(), df["DATE"].max()
-
 start, end = st.sidebar.date_input(
     "Date range",
-    value=(min_d, max_d),
-    min_value=min_d,
-    max_value=max_d
+    value=(df["DATE"].min(), df["DATE"].max()),
+    min_value=df["DATE"].min(),
+    max_value=df["DATE"].max()
 )
 
 df = df[(df["DATE"] >= pd.to_datetime(start)) &
@@ -188,7 +235,12 @@ c1, c2 = st.columns(2)
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(values.values, marker="o", color="#1f77b4", linewidth=1.5, label="Values")
+    ax.plot(values.values,
+            color="#1f77b4",
+            marker="o",
+            linewidth=1.5,
+            label="Values")
+
     ax.axhline(spec["Mean"], color="green", linewidth=2, label="Mean")
     ax.axhline(spec["USL"], color="red", linestyle="--", linewidth=2, label="USL")
     ax.axhline(spec["LSL"], color="orange", linestyle="--", linewidth=2, label="LSL")
@@ -202,13 +254,19 @@ with c1:
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.hist(values, bins=20, density=True, alpha=0.6,
-            color="#6BAED6", edgecolor="black")
+    ax.hist(values,
+            bins=20,
+            density=True,
+            alpha=0.6,
+            color="#6BAED6",
+            edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()),
-                color="purple", linewidth=2)
+        ax.plot(x,
+                norm.pdf(x, values.mean(), values.std()),
+                color="purple",
+                linewidth=2)
 
     ax.set_title("Histogram + Normal Curve", fontweight="bold")
     ax.grid(alpha=0.3)
@@ -216,7 +274,7 @@ with c2:
     st.pyplot(fig)
 
 # =========================
-# ROW 2 - CAPABILITY
+# CAPABILITY
 # =========================
 st.subheader("📐 Capability")
 
