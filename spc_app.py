@@ -45,6 +45,13 @@ headers = {"Authorization": f"Bearer {token['access_token']}"}
 # =========================
 # GET DRIVES (AUTO DISCOVERY)
 # =========================
+st.write("DRIVE ID:", DRIVE_ID)
+
+url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
+res = requests.get(url, headers=headers)
+
+st.write(res.status_code)
+st.json(res.json()) 
 @st.cache_data
 def get_drives():
     url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives"
