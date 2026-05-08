@@ -21,7 +21,7 @@ CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
 
 # 🔥 SITE CORECT (actualizat)
-SITE_ID = "sigitglobal.sharepoint.com,GLB-Quality-Alpla_Hefei"
+SITE_ID = "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:"
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
