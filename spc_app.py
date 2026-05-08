@@ -20,11 +20,10 @@ st.title("SPC Dashboard")
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
+SITE_ID = st.secrets["SITE_ID"]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
-
-SITE_ID = st.secrets["SITE_ID"]  # IMPORTANT: trebuie pus in secrets
 
 # =========================
 # AUTH
@@ -38,24 +37,24 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("Azure auth failed")
+    st.error("Azure authentication failed")
     st.write(token)
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# FILES (GRAPH PATHS CORECTE)
+# SHAREPOINT PATH
 # =========================
 base_path = "Shared Documents/Measurements-test files"
 
 def graph_url(file):
-    safe_file = urllib.parse.quote(file)
-    safe_path = urllib.parse.quote(base_path)
+    file_enc = urllib.parse.quote(file)
+    path_enc = urllib.parse.quote(base_path)
 
     return (
         f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root:"
-        f"/{safe_path}/{safe_file}:/content"
+        f"/{path_enc}/{file_enc}:/content"
     )
 
 files = {
@@ -71,7 +70,7 @@ selected = st.sidebar.selectbox("Select dataset", list(files.keys()))
 url = files[selected]
 
 # =========================
-# DOWNLOAD
+# DOWNLOAD FILE
 # =========================
 res = requests.get(url, headers=headers)
 
@@ -103,7 +102,7 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS
+# FILTERS (UNCHANGED)
 # =========================
 st.sidebar.header("Filters")
 
@@ -122,18 +121,10 @@ df = df[(df["DATE"] >= pd.to_datetime(start_date)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-if st.sidebar.checkbox("Select all RAW MATERIAL", True):
-    selected_m = materials
-else:
-    selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
-
+selected_m = materials if st.sidebar.checkbox("Select all RAW MATERIAL", True) else st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
 df = df[df["RAW MATERIAL"].isin(selected_m)]
 
-if st.sidebar.checkbox("Select all COLOR", True):
-    selected_c = colors
-else:
-    selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
-
+selected_c = colors if st.sidebar.checkbox("Select all COLOR", True) else st.sidebar.multiselect("COLOR", colors, default=colors)
 df = df[df["COLOR"].isin(selected_c)]
 
 # =========================
@@ -157,6 +148,8 @@ stats = pd.DataFrame({
     "Min": g["Value"].min(),
     "Count": g["Value"].count()
 }).reset_index(drop=True)
+
+stats["Std"] = stats["Std"].replace(0, np.nan)
 
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
 stats["Cpk"] = np.minimum(
@@ -201,21 +194,20 @@ c1, c2 = st.columns(2)
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(values.values, color="#1f77b4", marker="o", label="Values")
-    ax.axhline(spec["Mean"], color="green", label="Mean")
-    ax.axhline(spec["USL"], color="red", linestyle="--", label="USL")
-    ax.axhline(spec["LSL"], color="orange", linestyle="--", label="LSL")
+    ax.plot(values.values, marker="o", color="#1f77b4")
+    ax.axhline(spec["Mean"], color="green")
+    ax.axhline(spec["USL"], color="red", linestyle="--")
+    ax.axhline(spec["LSL"], color="orange", linestyle="--")
 
     ax.set_title("Control Chart")
     ax.grid(alpha=0.3)
-    ax.legend()
 
     st.pyplot(fig)
 
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.hist(values, bins=20, density=True, alpha=0.6, color="#6BAED6", edgecolor="black")
+    ax.hist(values, bins=20, density=True, alpha=0.6, color="#6BAED6")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
@@ -248,7 +240,7 @@ with c3:
         st.pyplot(fig)
 
 with c4:
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(6, 4))
 
     ax.bar(["Cp", "Cpk"], [spec["Cp"], spec["Cpk"]], color=["#1f77b4", "#17becf"])
     ax.axhline(1.33, color="red", linestyle="--")
