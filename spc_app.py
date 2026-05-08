@@ -7,7 +7,7 @@ from msal import ConfidentialClientApplication
 import requests
 from io import BytesIO
 
-# =========================
+# ============== ===========
 # CONFIG
 # =========================
 st.set_page_config(layout="wide")
