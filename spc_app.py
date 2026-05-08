@@ -11,7 +11,7 @@ from io import BytesIO
 # APP
 # =========================
 st.set_page_config(layout="wide")
-st.title("📊 SPC Dashboard")
+st.title("SPC Dashboard")
 
 # =========================
 # AUTH
@@ -34,13 +34,13 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("❌ Auth failed")
+    st.error("Auth failed")
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# GET DRIVES
+# DRIVE + FILES
 # =========================
 @st.cache_data
 def get_drive():
@@ -62,11 +62,6 @@ def get_drive():
 drive = get_drive()
 DRIVE_ID = drive["id"]
 
-st.sidebar.success(f"Drive: {drive['name']}")
-
-# =========================
-# LIST FILES
-# =========================
 FOLDER_PATH = "Measurements-test files"
 
 @st.cache_data
@@ -83,9 +78,6 @@ def list_files():
 
 files_in_folder = list_files()
 
-# =========================
-# GET FILE
-# =========================
 def get_file_id(file_name):
     for f in files_in_folder:
         if f["name"] == file_name:
@@ -106,7 +98,7 @@ def download_file(file_id):
     return BytesIO(res.content)
 
 # =========================
-# FILES
+# FILE SELECT
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -144,9 +136,9 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS (MODERN UI)
+# FILTERS
 # =========================
-st.sidebar.header("🎛️ Filters")
+st.sidebar.header("Filters")
 
 start, end = st.sidebar.date_input(
     "Date range",
@@ -161,19 +153,8 @@ df = df[(df["DATE"] >= pd.to_datetime(start)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-col1, col2 = st.sidebar.columns(2)
-
-with col1:
-    if st.checkbox("All RM", True):
-        selected_m = materials
-    else:
-        selected_m = st.multiselect("Raw Material", materials, default=materials)
-
-with col2:
-    if st.checkbox("All COLOR", True):
-        selected_c = colors
-    else:
-        selected_c = st.multiselect("Color", colors, default=colors)
+selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
+selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
 
 df = df[
     df["RAW MATERIAL"].isin(selected_m) &
@@ -210,16 +191,30 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
-# =========================
-# TABLE
-# =========================
-st.subheader("📋 SPC Summary")
-st.dataframe(stats, use_container_width=True, height=350)
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# SELECT CHARACTERISTIC
+# STYLE TABLE (OOS RED + BOLD)
 # =========================
-st.markdown("## 📌 Measurement Point")
+def style(df):
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+
+    for col in ["Above OOS", "Below OOS"]:
+        s.loc[df[col] > 0, col] = "color:red;font-weight:bold"
+
+    return s
+
+st.subheader("SPC Summary")
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+
+# =========================
+# CHARACTERISTIC
+# =========================
+st.markdown("Measurement point")
 
 char = st.selectbox("Select characteristic", stats["Characteristic"])
 
@@ -228,64 +223,36 @@ spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================
-# ROW 1 - CONTROL + HISTOGRAM
+# CONTROL CHART
 # =========================
 c1, c2 = st.columns(2)
 
 with c1:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(values.values,
-            color="#1f77b4",
-            marker="o",
-            linewidth=1.5,
-            label="Values")
+    ax.plot(values.values, color="#1f77b4", marker="o", linewidth=1.5)
+    ax.axhline(spec["Mean"], color="green", linewidth=2)
+    ax.axhline(spec["USL"], color="red", linestyle="--", linewidth=2)
+    ax.axhline(spec["LSL"], color="orange", linestyle="--", linewidth=2)
 
-    ax.axhline(spec["Mean"], color="green", linewidth=2, label="Mean")
-    ax.axhline(spec["USL"], color="red", linestyle="--", linewidth=2, label="USL")
-    ax.axhline(spec["LSL"], color="orange", linestyle="--", linewidth=2, label="LSL")
-
-    ax.set_title("Control Chart", fontweight="bold")
+    ax.set_title("Control Chart")
     ax.grid(alpha=0.3)
-    ax.legend()
 
     st.pyplot(fig)
 
+# =========================
+# HISTOGRAM
+# =========================
 with c2:
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.hist(values,
-            bins=20,
-            density=True,
-            alpha=0.6,
-            color="#6BAED6",
-            edgecolor="black")
+    ax.hist(values, bins=20, density=True, alpha=0.6, color="#6BAED6", edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x,
-                norm.pdf(x, values.mean(), values.std()),
-                color="purple",
-                linewidth=2)
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple", linewidth=2)
 
-    ax.set_title("Histogram + Normal Curve", fontweight="bold")
+    ax.set_title("Histogram")
     ax.grid(alpha=0.3)
 
     st.pyplot(fig)
-
-# =========================
-# CAPABILITY
-# =========================
-st.subheader("📐 Capability")
-
-fig, ax = plt.subplots(figsize=(5, 3))
-
-ax.bar(["Cp", "Cpk"],
-       [spec["Cp"], spec["Cpk"]],
-       color=["#1f77b4", "#17becf"])
-
-ax.axhline(1.33, color="red", linestyle="--", linewidth=2)
-ax.set_title("Process Capability", fontweight="bold")
-ax.grid(alpha=0.3)
-
-st.pyplot(fig)
