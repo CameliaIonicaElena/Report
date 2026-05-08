@@ -8,7 +8,7 @@ import requests
 from io import BytesIO
 
 # =========================
-# APP
+# APP CONFIG
 # =========================
 st.set_page_config(layout="wide")
 st.title("SPC Dashboard")
@@ -40,7 +40,7 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================
-# DRIVE + FILES
+# DRIVE
 # =========================
 @st.cache_data
 def get_drive():
@@ -62,6 +62,9 @@ def get_drive():
 drive = get_drive()
 DRIVE_ID = drive["id"]
 
+# =========================
+# FILES
+# =========================
 FOLDER_PATH = "Measurements-test files"
 
 @st.cache_data
@@ -98,7 +101,7 @@ def download_file(file_id):
     return BytesIO(res.content)
 
 # =========================
-# FILE SELECT
+# SELECT FILE
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -136,7 +139,7 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================
-# FILTERS
+# FILTERS (MODERN UI)
 # =========================
 st.sidebar.header("Filters")
 
@@ -153,8 +156,19 @@ df = df[(df["DATE"] >= pd.to_datetime(start)) &
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_m = st.sidebar.multiselect("RAW MATERIAL", materials, default=materials)
-selected_c = st.sidebar.multiselect("COLOR", colors, default=colors)
+col1, col2 = st.sidebar.columns(2)
+
+with col1:
+    if st.checkbox("All RM", True):
+        selected_m = materials
+    else:
+        selected_m = st.multiselect("Raw Material", materials, default=materials)
+
+with col2:
+    if st.checkbox("All COLOR", True):
+        selected_c = colors
+    else:
+        selected_c = st.multiselect("Color", colors, default=colors)
 
 df = df[
     df["RAW MATERIAL"].isin(selected_m) &
@@ -191,6 +205,9 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
+# =========================
+# OOS
+# =========================
 above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
 below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 
@@ -198,7 +215,24 @@ stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
 # =========================
-# STYLE TABLE (OOS RED + BOLD)
+# PROCESS CAPABILITY LABEL
+# =========================
+def capability_label(cpk):
+    if pd.isna(cpk):
+        return None
+    elif cpk >= 1.67:
+        return "Excellent"
+    elif cpk >= 1.33:
+        return "Capable"
+    elif cpk >= 1:
+        return "Marginal"
+    else:
+        return "Not capable"
+
+stats["Process Capability"] = stats["Cpk"].apply(capability_label)
+
+# =========================
+# STYLE TABLE
 # =========================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -206,13 +240,18 @@ def style(df):
     for col in ["Above OOS", "Below OOS"]:
         s.loc[df[col] > 0, col] = "color:red;font-weight:bold"
 
+    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:#1f77b4;font-weight:bold"
+    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
+
     return s
 
 st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================
-# CHARACTERISTIC
+# SELECT CHARACTERISTIC
 # =========================
 st.markdown("Measurement point")
 
