@@ -20,6 +20,7 @@ CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
 
+# SharePoint site (CORECT FORMAT)
 SITE_ID = "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:"
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
@@ -52,7 +53,7 @@ def get_drive():
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Failed to fetch drives")
+        st.error("Failed to get drive")
         st.write(res.text)
         st.stop()
 
@@ -64,32 +65,38 @@ DRIVE_ID = drive["id"]
 st.sidebar.success(f"Drive: {drive['name']}")
 
 # =========================
-# LIST FILES (SAFE METHOD)
+# LIST FILES (FIXED FOLDER PATH)
 # =========================
 @st.cache_data
 def list_files():
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/Measurements-test files:/children"
+    folder_path = "Measurements-test files"
+
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{folder_path}:/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error(res.text)
+        st.error("Failed to list folder")
+        st.write(res.text)
         st.stop()
 
     return res.json().get("value", [])
 
-files_in_drive = list_files()
+files_in_folder = list_files()
+
+# DEBUG (optional)
+# st.write(files_in_folder)
 
 # =========================
-# GET FILE ID (EXACT MATCH)
+# GET FILE ID
 # =========================
 def get_file_id(file_name):
-    for f in files_in_drive:
+    for f in files_in_folder:
         if f["name"] == file_name:
             return f["id"]
 
     st.error(f"File not found: {file_name}")
     st.write("Available files:")
-    st.write([f["name"] for f in files_in_drive])
+    st.write([f["name"] for f in files_in_folder])
     st.stop()
 
 # =========================
@@ -100,14 +107,14 @@ def download_file(file_id):
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Failed to download file")
+        st.error("Download failed")
         st.write(res.text)
         st.stop()
 
     return BytesIO(res.content)
 
 # =========================
-# FILE SELECTION
+# FILES
 # =========================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
