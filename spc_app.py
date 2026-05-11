@@ -23,7 +23,7 @@ if "auth" not in st.session_state:
 
 if not st.session_state.auth:
 
-    st.subheader("Access Required - Confidential Data - Please introduce the password from any GQM Team member")
+    st.subheader("🔐 Access Required")
     pwd = st.text_input("Enter password", type="password")
 
     if st.button("Login"):
@@ -31,7 +31,7 @@ if not st.session_state.auth:
             st.session_state.auth = True
             st.rerun()
         else:
-            st.error("Wrong password, ask any GQM team member for info")
+            st.error("Wrong password")
             st.stop()
 
     st.stop()
@@ -111,10 +111,8 @@ def find_folder(drive_id, folder_name):
 @st.cache_data
 def list_files(drive_id, folder_name):
     folder_id = find_folder(drive_id, folder_name)
-
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
     res = requests.get(url, headers=headers)
-
     return res.json().get("value", [])
 
 files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
@@ -162,12 +160,8 @@ df_specs = pd.read_excel(excel, sheet_name="Specs")
 
 df_meas.columns = df_meas.columns.str.strip()
 df_specs.columns = df_specs.columns.str.strip()
-
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
-# =========================================================
-# TRANSFORM
-# =========================================================
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
@@ -175,29 +169,6 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
-
-# =========================================================
-# FILTERS
-# =========================================================
-st.sidebar.header("Filters")
-
-start_date, end_date = st.sidebar.date_input(
-    "Date Range",
-    value=(df["DATE"].min(), df["DATE"].max())
-)
-
-df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
-
-materials = sorted(df["RAW MATERIAL"].dropna().unique())
-colors = sorted(df["COLOR"].dropna().unique())
-
-selected_rm = st.sidebar.multiselect("Raw Material", materials, default=materials)
-selected_color = st.sidebar.multiselect("Color", colors, default=colors)
-
-df = df[
-    df["RAW MATERIAL"].isin(selected_rm) &
-    df["COLOR"].isin(selected_color)
-]
 
 # =========================================================
 # LIMITS
@@ -229,18 +200,12 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
-# =========================================================
-# OOS
-# =========================================================
 above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
 below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 
 stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
-# =========================================================
-# CAPABILITY
-# =========================================================
 def cap(x):
     if pd.isna(x):
         return "No data"
@@ -255,7 +220,7 @@ def cap(x):
 stats["Process Capability"] = stats["Cpk"].apply(cap)
 
 # =========================================================
-# STYLE TABLE (IMPORTANT FIX)
+# STYLE (UNCHANGED LOGIC, ONLY EMPHASIS FIX)
 # =========================================================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -271,7 +236,7 @@ def style(df):
     return s
 
 # =========================================================
-# OUTPUT TABLE
+# TABLE
 # =========================================================
 st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
@@ -294,7 +259,7 @@ with col1:
 
     fig, ax = plt.subplots()
 
-    ax.plot(values.values, marker="o", linewidth=1.5, color="#2E86C1")
+    ax.plot(values.values, marker="o", linewidth=1.5, color="#1f77b4")
 
     ax.axhline(spec["Mean"], color="green", linewidth=2, label="Mean")
     ax.axhline(spec["USL"], color="red", linestyle="--", label="USL")
@@ -306,8 +271,9 @@ with col1:
 
     st.pyplot(fig)
 
+    # LEGEND SUMMARY BELOW CHART
     st.caption(
-        f"Mean={spec['Mean']:.3f} | USL={spec['USL']:.3f} | LSL={spec['LSL']:.3f}"
+        f"Mean = {spec['Mean']:.3f} | USL = {spec['USL']:.3f} | LSL = {spec['LSL']:.3f}"
     )
 
 # ================= HISTOGRAM =================
@@ -315,17 +281,19 @@ with col2:
 
     fig, ax = plt.subplots()
 
-    ax.hist(values, bins=20, density=True, alpha=0.6, color="#5DADE2", edgecolor="black")
+    ax.hist(values, bins=20, density=True, alpha=0.6,
+            color="#4FC3F7", edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="#6A1B9A")
 
     ax.set_title(f"Histogram - {char}")
     ax.grid(alpha=0.3)
 
     st.pyplot(fig)
 
+    # LEGEND SUMMARY BELOW CHART
     st.caption(
-        f"Std={values.std():.3f} | N={len(values)} | Min={values.min():.3f} | Max={values.max():.3f}"
+        f"Std = {values.std():.3f} | N = {len(values)} | Min = {values.min():.3f} | Max = {values.max():.3f}"
     )
