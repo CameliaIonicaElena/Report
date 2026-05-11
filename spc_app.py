@@ -50,8 +50,8 @@ headers = {"Authorization": f"Bearer {token['access_token']}"}
 user_email = st.sidebar.text_input("Enter your company email")
 
 ALLOWED_USERS = [
-    "user1@company.com",
-    "user2@company.com",
+    "camelia-elena.ionica@sig.biz",
+    "roberta.grosu@sig.biz",
     "quality@company.com"
 ]
 
