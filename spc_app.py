@@ -112,7 +112,7 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER (ROBUST)
+# FIND FOLDER
 # =========================================================
 @st.cache_data
 def find_folder(drive_id, folder_name):
@@ -169,7 +169,7 @@ selected_dataset = st.sidebar.selectbox(
 selected_file = files[selected_dataset]
 
 # =========================================================
-# GET FILE ID
+# GET FILE
 # =========================================================
 def get_file_id(file_name):
 
@@ -183,7 +183,7 @@ def get_file_id(file_name):
 file_id = get_file_id(selected_file)
 
 # =========================================================
-# DOWNLOAD FILE
+# DOWNLOAD
 # =========================================================
 def download_file(file_id):
 
@@ -291,7 +291,7 @@ stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 # =========================================================
 def capability(cpk):
     if pd.isna(cpk):
-        return None
+        return "No data"
     if cpk >= 1.67:
         return "Excellent"
     if cpk >= 1.33:
@@ -303,10 +303,29 @@ def capability(cpk):
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
+# STYLE TABLE (ONLY CHANGES HERE)
+# =========================================================
+def style(df):
+
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+
+    # OOS RED + BOLD
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+
+    # CAPABILITY COLORS
+    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
+    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
+
+    return s
+
+# =========================================================
 # OUTPUT
 # =========================================================
 st.subheader("SPC Summary")
-st.dataframe(stats, use_container_width=True)
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 st.markdown("## Measurement Point")
 
@@ -318,20 +337,37 @@ values = data["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
+# ================= CONTROL CHART =================
 with col1:
     fig, ax = plt.subplots()
-    ax.plot(values.values)
-    ax.axhline(spec["Mean"], color="green")
-    ax.axhline(spec["USL"], color="red", linestyle="--")
-    ax.axhline(spec["LSL"], color="orange", linestyle="--")
+
+    ax.plot(values.values, color="#8e44ad", linewidth=1.8, label="Values")
+    ax.axhline(spec["Mean"], color="#27ae60", label="Mean")
+    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--", label="USL")
+    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--", label="LSL")
+
+    ax.set_title("Control Chart")
+    ax.grid(alpha=0.3)
+    ax.legend()
+
     st.pyplot(fig)
 
+    st.caption(f"Mean={spec['Mean']:.3f} | USL={spec['USL']:.3f} | LSL={spec['LSL']:.3f}")
+
+# ================= HISTOGRAM =================
 with col2:
     fig, ax = plt.subplots()
-    ax.hist(values, bins=20, density=True, alpha=0.6)
+
+    ax.hist(values, bins=20, density=True, alpha=0.65, color="#3498db", edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="#8e44ad", label="Normal Fit")
+
+    ax.set_title("Histogram")
+    ax.grid(alpha=0.3)
+    ax.legend()
 
     st.pyplot(fig)
+
+    st.caption(f"Std={values.std():.3f} | N={len(values)}")
