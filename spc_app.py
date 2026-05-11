@@ -14,34 +14,7 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# ACCESS CONTROL (CODE GATE)
-# =========================================================
-ACCESS_CODE = "3161"
-
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-
-    st.subheader("🔐 Access Required")
-
-    code = st.text_input("Enter access code", type="password")
-
-    if st.button("Enter"):
-
-        if code == ACCESS_CODE:
-            st.session_state.authenticated = True
-            st.success("Access granted")
-            st.rerun()
-
-        else:
-            st.error("Wrong code")
-            st.stop()
-
-    st.stop()
-
-# =========================================================
-# AUTH (Graph API)
+# AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -49,20 +22,6 @@ TENANT_ID = st.secrets["TENANT_ID"]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
-
-app = ConfidentialClientApplication(
-    CLIENT_ID,
-    authority=AUTHORITY,
-    client_credential=CLIENT_SECRET
-)
-
-token = app.acquire_token_for_client(scopes=SCOPES)
-
-if "access_token" not in token:
-    st.error("Authentication failed")
-    st.stop()
-
-headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
 # SHAREPOINT SITES
@@ -78,6 +37,11 @@ sites = {
     }
 }
 
+# =========================================================
+# SIDEBAR - SITE
+# =========================================================
+st.sidebar.header("Source")
+
 selected_site = st.sidebar.selectbox(
     "Select SharePoint Site",
     list(sites.keys())
@@ -85,6 +49,24 @@ selected_site = st.sidebar.selectbox(
 
 SITE_ID = sites[selected_site]["site_id"]
 FOLDER_NAME = sites[selected_site]["folder"]
+
+# =========================================================
+# AUTH APP
+# =========================================================
+app = ConfidentialClientApplication(
+    CLIENT_ID,
+    authority=AUTHORITY,
+    client_credential=CLIENT_SECRET
+)
+
+token = app.acquire_token_for_client(scopes=SCOPES)
+
+if "access_token" not in token:
+    st.error("Authentication failed")
+    st.write(token)
+    st.stop()
+
+headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
 # GET DRIVE
@@ -96,11 +78,13 @@ def get_drive(site_id):
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Drive error")
+        st.error("Failed loading drives")
+        st.write(res.text)
         st.stop()
 
     drives = res.json()["value"]
 
+    # prefer default document library
     for d in drives:
         if d["name"] in ["Documents", "Shared Documents"]:
             return d
@@ -111,25 +95,28 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER (ROBUST)
+# FIND FOLDER (ROBUST - SEARCH ANYWHERE)
 # =========================================================
 @st.cache_data
 def find_folder(drive_id, folder_name):
 
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{folder_name}')"
+
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
         st.error("Folder search failed")
+        st.write(res.text)
         st.stop()
 
     items = res.json().get("value", [])
 
-    for i in items:
-        if "folder" in i and i["name"] == folder_name:
-            return i["id"]
+    for item in items:
+        if "folder" in item and item["name"] == folder_name:
+            return item["id"]
 
-    st.error("Folder not found")
+    st.error(f"Folder not found: {folder_name}")
+    st.write([i["name"] for i in items])
     st.stop()
 
 # =========================================================
@@ -141,10 +128,12 @@ def list_files(drive_id, folder_name):
     folder_id = find_folder(drive_id, folder_name)
 
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
+
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Cannot load files")
+        st.error("Cannot read folder content")
+        st.write(res.text)
         st.stop()
 
     return res.json().get("value", [])
@@ -152,7 +141,7 @@ def list_files(drive_id, folder_name):
 files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
 
 # =========================================================
-# FILES
+# FILE SELECTION
 # =========================================================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -176,7 +165,8 @@ def get_file_id(file_name):
         if f["name"] == file_name:
             return f["id"]
 
-    st.error("File not found")
+    st.error(f"File not found: {file_name}")
+    st.write([f["name"] for f in files_in_folder])
     st.stop()
 
 file_id = get_file_id(selected_file)
@@ -187,15 +177,39 @@ file_id = get_file_id(selected_file)
 def download_file(file_id):
 
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
+
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
         st.error("Download failed")
+        st.write(res.text)
         st.stop()
 
     return BytesIO(res.content)
 
 excel = download_file(file_id)
+
+# =========================================================
+# SIDEBAR INFO
+# =========================================================
+st.sidebar.markdown("---")
+st.sidebar.success("Connected")
+
+st.sidebar.markdown(f"""
+### Data Source
+
+**Site**  
+{selected_site}
+
+**Folder**  
+{FOLDER_NAME}
+
+**Dataset**  
+{selected_dataset}
+
+**File**  
+{selected_file}
+""")
 
 # =========================================================
 # LOAD DATA
@@ -238,8 +252,17 @@ df = df[
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_rm = st.sidebar.multiselect("Raw Material", materials, default=materials)
-selected_color = st.sidebar.multiselect("Color", colors, default=colors)
+selected_rm = st.sidebar.multiselect(
+    "Raw Material",
+    materials,
+    default=materials
+)
+
+selected_color = st.sidebar.multiselect(
+    "Color",
+    colors,
+    default=colors
+)
 
 df = df[
     df["RAW MATERIAL"].isin(selected_rm) &
@@ -271,6 +294,7 @@ stats = pd.DataFrame({
 stats["Std"] = stats["Std"].replace(0, np.nan)
 
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
+
 stats["Cpk"] = np.minimum(
     (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
@@ -302,11 +326,35 @@ def capability(cpk):
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# OUTPUT
+# TABLE STYLE
+# =========================================================
+def style(df_style):
+
+    s = pd.DataFrame("", index=df_style.index, columns=df_style.columns)
+
+    s.loc[df_style["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df_style["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+
+    s.loc[df_style["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    s.loc[df_style["Process Capability"] == "Capable", "Process Capability"] = "color:#1f77b4;font-weight:bold"
+    s.loc[df_style["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    s.loc[df_style["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
+
+    return s
+
+# =========================================================
+# SUMMARY
 # =========================================================
 st.subheader("SPC Summary")
-st.dataframe(stats, use_container_width=True)
 
+st.dataframe(
+    stats.style.apply(style, axis=None),
+    use_container_width=True
+)
+
+# =========================================================
+# CHARTS
+# =========================================================
 st.markdown("## Measurement Point")
 
 char = st.selectbox("Select Characteristic", stats["Characteristic"])
@@ -319,18 +367,22 @@ col1, col2 = st.columns(2)
 
 with col1:
     fig, ax = plt.subplots()
-    ax.plot(values.values)
+    ax.plot(values.values, marker="o")
     ax.axhline(spec["Mean"], color="green")
     ax.axhline(spec["USL"], color="red", linestyle="--")
     ax.axhline(spec["LSL"], color="orange", linestyle="--")
+    ax.set_title("Control Chart")
+    ax.grid(alpha=0.3)
     st.pyplot(fig)
 
 with col2:
     fig, ax = plt.subplots()
-    ax.hist(values, bins=20, density=True, alpha=0.6)
+    ax.hist(values, bins=20, density=True, alpha=0.6, edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
+    ax.set_title("Histogram")
+    ax.grid(alpha=0.3)
     st.pyplot(fig)
