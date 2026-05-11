@@ -16,7 +16,7 @@ st.title("SPC Dashboard")
 # =========================================================
 # ACCESS PASSWORD GATE
 # =========================================================
-PASSWORD = "ShowRepoGQM31"
+PASSWORD = "ShowRepoGQM31" 
 
 if "auth" not in st.session_state:
     st.session_state.auth = False
