@@ -14,7 +14,7 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# AUTH
+# AUTH CONFIG (AZURE AD)
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -24,34 +24,7 @@ AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
 
 # =========================================================
-# SHAREPOINT SITES
-# =========================================================
-sites = {
-    "ALPLA HEFEI": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
-        "folder": "Measurements-test files"
-    },
-    "ALPLA BRAZIL": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
-        "folder": "Measurements-test files"
-    }
-}
-
-# =========================================================
-# SIDEBAR - SITE
-# =========================================================
-st.sidebar.header("Source")
-
-selected_site = st.sidebar.selectbox(
-    "Select SharePoint Site",
-    list(sites.keys())
-)
-
-SITE_ID = sites[selected_site]["site_id"]
-FOLDER_NAME = sites[selected_site]["folder"]
-
-# =========================================================
-# AUTH APP
+# LOGIN (MSAL - SILENT TOKEN)
 # =========================================================
 app = ConfidentialClientApplication(
     CLIENT_ID,
@@ -69,6 +42,49 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
+# USER AUTH (EMAIL CONTROL)
+# =========================================================
+# NOTE: in production, replace with real user info from Azure login flow
+# (preferred_username from delegated auth flow)
+
+user_email = st.sidebar.text_input("Enter your company email")
+
+ALLOWED_USERS = [
+    "user1@company.com",
+    "user2@company.com",
+    "quality@company.com"
+]
+
+if user_email and user_email not in ALLOWED_USERS:
+    st.error("❌ Access denied")
+    st.stop()
+
+if user_email:
+    st.sidebar.success(f"Logged in as {user_email}")
+
+# =========================================================
+# SHAREPOINT SITES
+# =========================================================
+sites = {
+    "ALPLA HEFEI": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
+        "folder": "Measurements-test files"
+    },
+    "ALPLA BRAZIL": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
+        "folder": "Measurements-test files"
+    }
+}
+
+selected_site = st.sidebar.selectbox(
+    "Select SharePoint Site",
+    list(sites.keys())
+)
+
+SITE_ID = sites[selected_site]["site_id"]
+FOLDER_NAME = sites[selected_site]["folder"]
+
+# =========================================================
 # GET DRIVE
 # =========================================================
 @st.cache_data
@@ -84,7 +100,6 @@ def get_drive(site_id):
 
     drives = res.json()["value"]
 
-    # prefer default document library
     for d in drives:
         if d["name"] in ["Documents", "Shared Documents"]:
             return d
@@ -95,7 +110,7 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER (ROBUST - SEARCH ANYWHERE)
+# FIND FOLDER (ROBUST SEARCH)
 # =========================================================
 @st.cache_data
 def find_folder(drive_id, folder_name):
@@ -115,8 +130,7 @@ def find_folder(drive_id, folder_name):
         if "folder" in item and item["name"] == folder_name:
             return item["id"]
 
-    st.error(f"Folder not found: {folder_name}")
-    st.write([i["name"] for i in items])
+    st.error("Folder not found")
     st.stop()
 
 # =========================================================
@@ -146,7 +160,7 @@ files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
     "Dataset 1": "Test-Measurements&Specs1.xlsx",
-    "Dataset 2": "Test-Measurements&Specs2.xlsx"
+    "Dataset 2": "Test-Measurements&Specs2.xlsx",
 }
 
 selected_dataset = st.sidebar.selectbox(
@@ -165,7 +179,7 @@ def get_file_id(file_name):
         if f["name"] == file_name:
             return f["id"]
 
-    st.error(f"File not found: {file_name}")
+    st.error("File not found")
     st.write([f["name"] for f in files_in_folder])
     st.stop()
 
@@ -188,28 +202,6 @@ def download_file(file_id):
     return BytesIO(res.content)
 
 excel = download_file(file_id)
-
-# =========================================================
-# SIDEBAR INFO
-# =========================================================
-st.sidebar.markdown("---")
-st.sidebar.success("Connected")
-
-st.sidebar.markdown(f"""
-### Data Source
-
-**Site**  
-{selected_site}
-
-**Folder**  
-{FOLDER_NAME}
-
-**Dataset**  
-{selected_dataset}
-
-**File**  
-{selected_file}
-""")
 
 # =========================================================
 # LOAD DATA
@@ -252,17 +244,8 @@ df = df[
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_rm = st.sidebar.multiselect(
-    "Raw Material",
-    materials,
-    default=materials
-)
-
-selected_color = st.sidebar.multiselect(
-    "Color",
-    colors,
-    default=colors
-)
+selected_rm = st.sidebar.multiselect("Raw Material", materials, default=materials)
+selected_color = st.sidebar.multiselect("Color", colors, default=colors)
 
 df = df[
     df["RAW MATERIAL"].isin(selected_rm) &
@@ -326,35 +309,12 @@ def capability(cpk):
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# TABLE STYLE
-# =========================================================
-def style(df_style):
-
-    s = pd.DataFrame("", index=df_style.index, columns=df_style.columns)
-
-    s.loc[df_style["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
-    s.loc[df_style["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
-
-    s.loc[df_style["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
-    s.loc[df_style["Process Capability"] == "Capable", "Process Capability"] = "color:#1f77b4;font-weight:bold"
-    s.loc[df_style["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
-    s.loc[df_style["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
-
-    return s
-
-# =========================================================
-# SUMMARY
+# OUTPUT
 # =========================================================
 st.subheader("SPC Summary")
 
-st.dataframe(
-    stats.style.apply(style, axis=None),
-    use_container_width=True
-)
+st.dataframe(stats, use_container_width=True)
 
-# =========================================================
-# CHARTS
-# =========================================================
 st.markdown("## Measurement Point")
 
 char = st.selectbox("Select Characteristic", stats["Characteristic"])
@@ -367,22 +327,20 @@ col1, col2 = st.columns(2)
 
 with col1:
     fig, ax = plt.subplots()
-    ax.plot(values.values, marker="o")
+    ax.plot(values.values)
     ax.axhline(spec["Mean"], color="green")
     ax.axhline(spec["USL"], color="red", linestyle="--")
     ax.axhline(spec["LSL"], color="orange", linestyle="--")
     ax.set_title("Control Chart")
-    ax.grid(alpha=0.3)
     st.pyplot(fig)
 
 with col2:
     fig, ax = plt.subplots()
-    ax.hist(values, bins=20, density=True, alpha=0.6, edgecolor="black")
+    ax.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
     ax.set_title("Histogram")
-    ax.grid(alpha=0.3)
     st.pyplot(fig)
