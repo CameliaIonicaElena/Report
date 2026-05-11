@@ -23,7 +23,7 @@ if "auth" not in st.session_state:
 
 if not st.session_state.auth:
 
-    st.subheader("🔐 Access Required")
+    st.subheader("Confidential Data - Access Required - Ask any GQM team memnber for extra info")
 
     pwd = st.text_input("Enter password", type="password")
 
