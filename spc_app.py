@@ -24,17 +24,11 @@ if "auth" not in st.session_state:
 if not st.session_state.auth:
 
     st.subheader("Confidential Data - Access Required")
-
-    pwd = st.text_input(
-        "Enter password - Ask any GQM team member for access",
-        type="password"
-    )
+    pwd = st.text_input("Enter password - Ask GQM team member", type="password")
 
     if st.button("Login"):
-
         if pwd == PASSWORD:
             st.session_state.auth = True
-            st.success("Access granted")
             st.rerun()
         else:
             st.error("Wrong password")
@@ -80,11 +74,7 @@ sites = {
     }
 }
 
-selected_site = st.sidebar.selectbox(
-    "Select SharePoint Site",
-    list(sites.keys())
-)
-
+selected_site = st.sidebar.selectbox("Select SharePoint Site", list(sites.keys()))
 SITE_ID = sites[selected_site]["site_id"]
 FOLDER_NAME = sites[selected_site]["folder"]
 
@@ -120,7 +110,6 @@ def find_folder(drive_id, folder_name):
 # =========================================================
 @st.cache_data
 def list_files(drive_id, folder_name):
-
     folder_id = find_folder(drive_id, folder_name)
 
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
@@ -143,12 +132,13 @@ selected_dataset = st.sidebar.selectbox("Select Dataset", list(files.keys()))
 selected_file = files[selected_dataset]
 
 # =========================================================
-# GET FILE
+# FILE ID
 # =========================================================
 def get_file_id(file_name):
     for f in files_in_folder:
         if f["name"] == file_name:
             return f["id"]
+
     st.error("File not found")
     st.stop()
 
@@ -197,7 +187,10 @@ start_date, end_date = st.sidebar.date_input(
     value=(df["DATE"].min(), df["DATE"].max())
 )
 
-df = df[(df["DATE"] >= start_date) & (df["DATE"] <= end_date)]
+df = df[
+    (df["DATE"] >= pd.to_datetime(start_date)) &
+    (df["DATE"] <= pd.to_datetime(end_date))
+]
 
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
@@ -240,43 +233,49 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
+# =========================================================
+# OOS
+# =========================================================
 above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
 below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 
 stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
-def capability(cpk):
-    if pd.isna(cpk):
-        return None
-    if cpk >= 1.67:
+# =========================================================
+# CAPABILITY
+# =========================================================
+def capability(x):
+    if pd.isna(x):
+        return "No data"
+    if x >= 1.67:
         return "Excellent"
-    if cpk >= 1.33:
+    if x >= 1.33:
         return "Capable"
-    if cpk >= 1:
+    if x >= 1:
         return "Marginal"
     return "Not capable"
 
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# STYLE TABLE
+# STYLE SAFE (NO STREAMLIT CRASH)
 # =========================================================
 def style(df):
-    s = pd.DataFrame("", index=df.index, columns=df.columns)
+    styles = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
-    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+    styles.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    styles.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
 
-    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
-    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:#1f77b4;font-weight:bold"
-    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
-    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
+    styles.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    styles.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:#1f77b4;font-weight:bold"
+    styles.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    styles.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
 
-    return s
+    return styles
 
 # =========================================================
-# OUTPUT TABLE
+# TABLE
 # =========================================================
 st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
@@ -294,16 +293,14 @@ values = data["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
-# ================= CONTROL CHART =================
+# CONTROL CHART
 with col1:
-
     fig, ax = plt.subplots()
 
-    ax.plot(values.values, marker="o", linewidth=1.5, color="#1f77b4")
-
-    ax.axhline(spec["Mean"], color="green", linewidth=2, label="Mean")
-    ax.axhline(spec["USL"], color="red", linestyle="--", label="USL")
-    ax.axhline(spec["LSL"], color="orange", linestyle="--", label="LSL")
+    ax.plot(values.values, marker="o", linewidth=1.5, color="#2E86C1", label="Values")
+    ax.axhline(spec["Mean"], color="green", linewidth=2, label=f"Mean {spec['Mean']:.2f}")
+    ax.axhline(spec["USL"], color="red", linestyle="--", label=f"USL {spec['USL']:.2f}")
+    ax.axhline(spec["LSL"], color="orange", linestyle="--", label=f"LSL {spec['LSL']:.2f}")
 
     ax.set_title(f"Control Chart - {char}")
     ax.grid(alpha=0.3)
@@ -311,27 +308,18 @@ with col1:
 
     st.pyplot(fig)
 
-    st.caption(
-        f"Mean={spec['Mean']:.3f} | USL={spec['USL']:.3f} | LSL={spec['LSL']:.3f}"
-    )
-
-# ================= HISTOGRAM =================
+# HISTOGRAM
 with col2:
-
     fig, ax = plt.subplots()
 
-    ax.hist(values, bins=20, density=True, alpha=0.6,
-            color="#4FC3F7", edgecolor="black")
+    ax.hist(values, bins=20, density=True, alpha=0.6, color="#5DADE2", edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="#6A1B9A")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple", label="Normal fit")
 
     ax.set_title(f"Histogram - {char}")
+    ax.legend()
     ax.grid(alpha=0.3)
 
     st.pyplot(fig)
-
-    st.caption(
-        f"Std={values.std():.3f} | N={len(values)} | Min={values.min():.3f} | Max={values.max():.3f}"
-    )
