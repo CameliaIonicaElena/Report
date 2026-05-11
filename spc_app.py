@@ -23,9 +23,9 @@ if "auth" not in st.session_state:
 
 if not st.session_state.auth:
 
-    st.subheader("Confidential Data - Access Required - Ask any GQM team memnber for extra info")
+    st.subheader("Confidential Data - Access Required")
 
-    pwd = st.text_input("Enter password", type="password")
+    pwd = st.text_input("Enter password - Ask any GQM team memnber for extra info", type="password")
 
     if st.button("Login"):
 
