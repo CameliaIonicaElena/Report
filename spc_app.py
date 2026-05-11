@@ -24,13 +24,16 @@ if "auth" not in st.session_state:
 if not st.session_state.auth:
 
     st.subheader("Confidential Data - Access Required")
+
     pwd = st.text_input("Enter password - Ask any GQM team memnber for extra info", type="password")
 
     if st.button("Login"):
+
         if pwd == PASSWORD:
             st.session_state.auth = True
             st.success("Access granted")
             st.rerun()
+
         else:
             st.error("Wrong password")
             st.stop()
@@ -57,6 +60,7 @@ token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
     st.error("Authentication failed")
+    st.write(token)
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
@@ -75,7 +79,11 @@ sites = {
     }
 }
 
-selected_site = st.sidebar.selectbox("Select SharePoint Site", list(sites.keys()))
+selected_site = st.sidebar.selectbox(
+    "Select SharePoint Site",
+    list(sites.keys())
+)
+
 SITE_ID = sites[selected_site]["site_id"]
 FOLDER_NAME = sites[selected_site]["folder"]
 
@@ -84,22 +92,41 @@ FOLDER_NAME = sites[selected_site]["folder"]
 # =========================================================
 @st.cache_data
 def get_drive(site_id):
+
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
     res = requests.get(url, headers=headers)
-    return res.json()["value"][0]
+
+    if res.status_code != 200:
+        st.error("Failed loading drives")
+        st.stop()
+
+    drives = res.json()["value"]
+
+    for d in drives:
+        if d["name"] in ["Documents", "Shared Documents"]:
+            return d
+
+    return drives[0]
 
 drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER
+# FIND FOLDER (ROBUST)
 # =========================================================
 @st.cache_data
 def find_folder(drive_id, folder_name):
+
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{folder_name}')"
     res = requests.get(url, headers=headers)
 
-    for i in res.json().get("value", []):
+    if res.status_code != 200:
+        st.error("Folder search failed")
+        st.stop()
+
+    items = res.json().get("value", [])
+
+    for i in items:
         if "folder" in i and i["name"] == folder_name:
             return i["id"]
 
@@ -111,10 +138,15 @@ def find_folder(drive_id, folder_name):
 # =========================================================
 @st.cache_data
 def list_files(drive_id, folder_name):
+
     folder_id = find_folder(drive_id, folder_name)
 
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
     res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot read folder content")
+        st.stop()
 
     return res.json().get("value", [])
 
@@ -129,13 +161,18 @@ files = {
     "Dataset 2": "Test-Measurements&Specs2.xlsx"
 }
 
-selected_dataset = st.sidebar.selectbox("Select Dataset", list(files.keys()))
+selected_dataset = st.sidebar.selectbox(
+    "Select Dataset",
+    list(files.keys())
+)
+
 selected_file = files[selected_dataset]
 
 # =========================================================
 # GET FILE ID
 # =========================================================
 def get_file_id(file_name):
+
     for f in files_in_folder:
         if f["name"] == file_name:
             return f["id"]
@@ -146,11 +183,17 @@ def get_file_id(file_name):
 file_id = get_file_id(selected_file)
 
 # =========================================================
-# DOWNLOAD
+# DOWNLOAD FILE
 # =========================================================
 def download_file(file_id):
+
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
     res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Download failed")
+        st.stop()
+
     return BytesIO(res.content)
 
 excel = download_file(file_id)
@@ -164,6 +207,7 @@ df_specs = pd.read_excel(excel, sheet_name="Specs")
 
 df_meas.columns = df_meas.columns.str.strip()
 df_specs.columns = df_specs.columns.str.strip()
+
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
 # =========================================================
@@ -176,6 +220,32 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
+
+# =========================================================
+# FILTERS
+# =========================================================
+st.sidebar.header("Filters")
+
+start_date, end_date = st.sidebar.date_input(
+    "Date Range",
+    value=(df["DATE"].min(), df["DATE"].max())
+)
+
+df = df[
+    (df["DATE"] >= pd.to_datetime(start_date)) &
+    (df["DATE"] <= pd.to_datetime(end_date))
+]
+
+materials = sorted(df["RAW MATERIAL"].dropna().unique())
+colors = sorted(df["COLOR"].dropna().unique())
+
+selected_rm = st.sidebar.multiselect("Raw Material", materials, default=materials)
+selected_color = st.sidebar.multiselect("Color", colors, default=colors)
+
+df = df[
+    df["RAW MATERIAL"].isin(selected_rm) &
+    df["COLOR"].isin(selected_color)
+]
 
 # =========================================================
 # LIMITS
@@ -219,46 +289,25 @@ stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 # =========================================================
 # CAPABILITY
 # =========================================================
-def capability(x):
-    if pd.isna(x):
-        return "No data"
-    if x >= 1.67:
+def capability(cpk):
+    if pd.isna(cpk):
+        return None
+    if cpk >= 1.67:
         return "Excellent"
-    if x >= 1.33:
+    if cpk >= 1.33:
         return "Capable"
-    if x >= 1:
+    if cpk >= 1:
         return "Marginal"
     return "Not capable"
 
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# STYLE FIX (ONLY WHAT YOU ASKED)
-# =========================================================
-def style(df):
-    s = pd.DataFrame("", index=df.index, columns=df.columns)
-
-    # OOS RED + BOLD
-    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
-    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
-
-    # Capability colors
-    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
-    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:#1f77b4;font-weight:bold"
-    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
-    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
-
-    return s
-
-# =========================================================
-# TABLE
+# OUTPUT
 # =========================================================
 st.subheader("SPC Summary")
-st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+st.dataframe(stats, use_container_width=True)
 
-# =========================================================
-# CHARTS
-# =========================================================
 st.markdown("## Measurement Point")
 
 char = st.selectbox("Select Characteristic", stats["Characteristic"])
@@ -269,38 +318,20 @@ values = data["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
-# CONTROL CHART (ENHANCED VISUAL ONLY)
 with col1:
     fig, ax = plt.subplots()
-
-    ax.plot(values.values, marker="o", linewidth=1.5, color="#1f77b4", label="Values")
-
-    ax.axhline(spec["Mean"], color="green", linewidth=2, label=f"Mean: {spec['Mean']:.2f}")
-    ax.axhline(spec["USL"], color="red", linestyle="--", label=f"USL: {spec['USL']:.2f}")
-    ax.axhline(spec["LSL"], color="orange", linestyle="--", label=f"LSL: {spec['LSL']:.2f}")
-
-    ax.set_title(f"Control Chart - {char}")
-    ax.grid(alpha=0.3)
-    ax.legend()
-
+    ax.plot(values.values)
+    ax.axhline(spec["Mean"], color="green")
+    ax.axhline(spec["USL"], color="red", linestyle="--")
+    ax.axhline(spec["LSL"], color="orange", linestyle="--")
     st.pyplot(fig)
 
-    st.caption(f"Cpk={spec['Cpk']:.2f} | Cp={spec['Cp']:.2f} | N={len(values)}")
-
-# HISTOGRAM (ENHANCED VISUAL ONLY)
 with col2:
     fig, ax = plt.subplots()
-
-    ax.hist(values, bins=20, density=True, alpha=0.6, color="#5DADE2", edgecolor="black", label="Data")
+    ax.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple", label="Normal fit")
-
-    ax.set_title(f"Histogram - {char}")
-    ax.legend()
-    ax.grid(alpha=0.3)
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
     st.pyplot(fig)
-
-    st.caption(f"Mean={values.mean():.2f} | Std={values.std():.2f} | Min={values.min():.2f} | Max={values.max():.2f}")
