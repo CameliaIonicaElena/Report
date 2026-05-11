@@ -7,47 +7,97 @@ from msal import ConfidentialClientApplication
 import requests
 from io import BytesIO
 
-# =========================
-# APP
-# =========================
-st.set_page_config(layout="wide")
+# =========================================================
+# PAGE
+# =========================================================
+st.set_page_config(
+    page_title="SPC Dashboard",
+    layout="wide"
+)
+
 st.title("SPC Dashboard")
 
-# =========================
+# =========================================================
 # AUTH
-# =========================
+# =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
-SCOPES = ["https://graph.microsoft.com/.default"]
 
-SITE_ID = "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:"
+SCOPES = [
+    "https://graph.microsoft.com/.default"
+]
 
+# =========================================================
+# SHAREPOINT SITES
+# =========================================================
+sites = {
+
+    "ALPLA HEFEI": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
+        "folder": "Measurements-test files"
+    },
+
+    "ALPLA BRAZIL": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
+        "folder": "Measurements-test files"
+    }
+}
+
+# =========================================================
+# SIDEBAR - SITE
+# =========================================================
+st.sidebar.header("Source")
+
+selected_site = st.sidebar.selectbox(
+    "Select SharePoint Site",
+    list(sites.keys())
+)
+
+SITE_ID = sites[selected_site]["site_id"]
+
+FOLDER_PATH = sites[selected_site]["folder"]
+
+# =========================================================
+# AUTH APP
+# =========================================================
 app = ConfidentialClientApplication(
     CLIENT_ID,
     authority=AUTHORITY,
     client_credential=CLIENT_SECRET
 )
 
-token = app.acquire_token_for_client(scopes=SCOPES)
+token = app.acquire_token_for_client(
+    scopes=SCOPES
+)
 
 if "access_token" not in token:
+
     st.error("Authentication failed")
+    st.write(token)
     st.stop()
 
-headers = {"Authorization": f"Bearer {token['access_token']}"}
+headers = {
+    "Authorization": f"Bearer {token['access_token']}"
+}
 
-# =========================
+# =========================================================
 # GET DRIVE
-# =========================
+# =========================================================
 @st.cache_data
-def get_drive():
-    url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives"
-    res = requests.get(url, headers=headers)
+def get_drive(site_id):
+
+    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
+
+    res = requests.get(
+        url,
+        headers=headers
+    )
 
     if res.status_code != 200:
+
         st.error("Failed loading SharePoint drives")
         st.write(res.text)
         st.stop()
@@ -55,84 +105,113 @@ def get_drive():
     drives = res.json()["value"]
 
     for d in drives:
-        if "Documents" in d["name"] or "Shared" in d["name"]:
+
+        if (
+            "Documents" in d["name"]
+            or
+            "Shared" in d["name"]
+        ):
             return d
 
     return drives[0]
 
-drive = get_drive()
+drive = get_drive(SITE_ID)
+
 DRIVE_ID = drive["id"]
 
-# =========================
-# FOLDER
-# =========================
-FOLDER_PATH = "Measurements-test files"
-
+# =========================================================
+# LIST FILES
+# =========================================================
 @st.cache_data
-def list_files():
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{FOLDER_PATH}:/children"
+def list_files(drive_id, folder_path):
 
-    res = requests.get(url, headers=headers)
+    url = (
+        f"https://graph.microsoft.com/v1.0/"
+        f"drives/{drive_id}/root:/{folder_path}:/children"
+    )
+
+    res = requests.get(
+        url,
+        headers=headers
+    )
 
     if res.status_code != 200:
+
         st.error("Folder not found")
         st.write(res.text)
         st.stop()
 
     return res.json().get("value", [])
 
-files_in_folder = list_files()
+files_in_folder = list_files(
+    DRIVE_ID,
+    FOLDER_PATH
+)
 
-# =========================
-# GET FILE ID
-# =========================
-def get_file_id(file_name):
-    for f in files_in_folder:
-        if f["name"] == file_name:
-            return f["id"]
-
-    st.error(f"File not found: {file_name}")
-    st.write([f["name"] for f in files_in_folder])
-    st.stop()
-
-# =========================
-# DOWNLOAD FILE
-# =========================
-def download_file(file_id):
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
-
-    res = requests.get(url, headers=headers)
-
-    if res.status_code != 200:
-        st.error("Download failed")
-        st.write(res.text)
-        st.stop()
-
-    return BytesIO(res.content)
-
-# =========================
+# =========================================================
 # FILES
-# =========================
+# =========================================================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
     "Dataset 1": "Test-Measurements&Specs1.xlsx",
     "Dataset 2": "Test-Measurements&Specs2.xlsx",
 }
 
-selected = st.sidebar.selectbox(
-    "Select dataset",
+selected_dataset = st.sidebar.selectbox(
+    "Select Dataset",
     list(files.keys())
 )
 
-file_name = files[selected]
+selected_file = files[selected_dataset]
 
-file_id = get_file_id(file_name)
+# =========================================================
+# GET FILE ID
+# =========================================================
+def get_file_id(file_name):
+
+    for f in files_in_folder:
+
+        if f["name"] == file_name:
+            return f["id"]
+
+    st.error(f"File not found: {file_name}")
+
+    st.write(
+        [f["name"] for f in files_in_folder]
+    )
+
+    st.stop()
+
+file_id = get_file_id(selected_file)
+
+# =========================================================
+# DOWNLOAD FILE
+# =========================================================
+def download_file(file_id):
+
+    url = (
+        f"https://graph.microsoft.com/v1.0/"
+        f"drives/{DRIVE_ID}/items/{file_id}/content"
+    )
+
+    res = requests.get(
+        url,
+        headers=headers
+    )
+
+    if res.status_code != 200:
+
+        st.error("Download failed")
+        st.write(res.text)
+        st.stop()
+
+    return BytesIO(res.content)
 
 excel = download_file(file_id)
 
-# =========================
+# =========================================================
 # SIDEBAR INFO
-# =========================
+# =========================================================
 st.sidebar.markdown("---")
 
 st.sidebar.success("Connected")
@@ -142,22 +221,22 @@ st.sidebar.markdown(
 ### Data Source
 
 **Site**  
-GLB-Quality-Alpla_Hefei
+{selected_site}
 
 **Folder**  
 {FOLDER_PATH}
 
 **Dataset**  
-{selected}
+{selected_dataset}
 
 **File**  
-{file_name}
+{selected_file}
 """
 )
 
-# =========================
-# LOAD DATA
-# =========================
+# =========================================================
+# LOAD EXCEL
+# =========================================================
 df_meas = pd.read_excel(
     excel,
     sheet_name="Measurements"
@@ -170,14 +249,27 @@ df_specs = pd.read_excel(
     sheet_name="Specs"
 )
 
-df_meas.columns = df_meas.columns.str.strip()
-df_specs.columns = df_specs.columns.str.strip()
+# =========================================================
+# CLEAN COLUMNS
+# =========================================================
+df_meas.columns = (
+    df_meas.columns.str.strip()
+)
 
-df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
+df_specs.columns = (
+    df_specs.columns.str.strip()
+)
 
-# =========================
+# =========================================================
+# DATE
+# =========================================================
+df_meas["DATE"] = pd.to_datetime(
+    df_meas["DATE"]
+)
+
+# =========================================================
 # TRANSFORM
-# =========================
+# =========================================================
 df_long = df_meas.melt(
     id_vars=[
         "DATE",
@@ -195,13 +287,16 @@ df = df_long.merge(
     how="left"
 )
 
-# =========================
+# =========================================================
 # FILTERS
-# =========================
+# =========================================================
 st.sidebar.header("Filters")
 
+# =========================================================
+# DATE FILTER
+# =========================================================
 start_date, end_date = st.sidebar.date_input(
-    "Date range",
+    "Date Range",
     value=(
         df["DATE"].min(),
         df["DATE"].max()
@@ -211,108 +306,212 @@ start_date, end_date = st.sidebar.date_input(
 )
 
 df = df[
-    (df["DATE"] >= pd.to_datetime(start_date)) &
-    (df["DATE"] <= pd.to_datetime(end_date))
+    (
+        df["DATE"] >= pd.to_datetime(start_date)
+    )
+    &
+    (
+        df["DATE"] <= pd.to_datetime(end_date)
+    )
 ]
 
+# =========================================================
+# RM FILTER
+# =========================================================
 materials = sorted(
-    df["RAW MATERIAL"].dropna().unique()
+    df["RAW MATERIAL"]
+    .dropna()
+    .unique()
 )
 
-colors = sorted(
-    df["COLOR"].dropna().unique()
-)
+if st.sidebar.checkbox(
+    "All RM",
+    value=True
+):
 
-# =========================
-# RAW MATERIAL
-# =========================
-if st.sidebar.checkbox("All RM", True):
-    selected_m = materials
+    selected_rm = materials
+
 else:
-    selected_m = st.sidebar.multiselect(
+
+    selected_rm = st.sidebar.multiselect(
         "Raw Material",
         materials,
         default=materials
     )
 
-# =========================
-# COLOR
-# =========================
-if st.sidebar.checkbox("All COLOR", True):
-    selected_c = colors
+# =========================================================
+# COLOR FILTER
+# =========================================================
+colors = sorted(
+    df["COLOR"]
+    .dropna()
+    .unique()
+)
+
+if st.sidebar.checkbox(
+    "All COLOR",
+    value=True
+):
+
+    selected_color = colors
+
 else:
-    selected_c = st.sidebar.multiselect(
+
+    selected_color = st.sidebar.multiselect(
         "Color",
         colors,
         default=colors
     )
 
+# =========================================================
+# APPLY FILTERS
+# =========================================================
 df = df[
-    df["RAW MATERIAL"].isin(selected_m) &
-    df["COLOR"].isin(selected_c)
+    (
+        df["RAW MATERIAL"]
+        .isin(selected_rm)
+    )
+    &
+    (
+        df["COLOR"]
+        .isin(selected_color)
+    )
 ]
 
-# =========================
+# =========================================================
 # LIMITS
-# =========================
-df["USL"] = df["Target"] + df["Upper Dev"]
-df["LSL"] = df["Target"] + df["Lower Dev"]
+# =========================================================
+df["USL"] = (
+    df["Target"]
+    +
+    df["Upper Dev"]
+)
 
-# =========================
+df["LSL"] = (
+    df["Target"]
+    +
+    df["Lower Dev"]
+)
+
+# =========================================================
 # STATS
-# =========================
-g = df.groupby("Characteristic")
+# =========================================================
+g = df.groupby(
+    "Characteristic"
+)
 
 stats = pd.DataFrame({
-    "Characteristic": g["Characteristic"].first(),
-    "USL": g["USL"].first(),
-    "LSL": g["LSL"].first(),
-    "Mean": g["Value"].mean(),
-    "Std": g["Value"].std(),
-    "Max": g["Value"].max(),
-    "Min": g["Value"].min(),
-    "Count": g["Value"].count()
+
+    "Characteristic":
+        g["Characteristic"].first(),
+
+    "USL":
+        g["USL"].first(),
+
+    "LSL":
+        g["LSL"].first(),
+
+    "Mean":
+        g["Value"].mean(),
+
+    "Std":
+        g["Value"].std(),
+
+    "Max":
+        g["Value"].max(),
+
+    "Min":
+        g["Value"].min(),
+
+    "Count":
+        g["Value"].count()
+
 }).reset_index(drop=True)
 
-stats["Std"] = stats["Std"].replace(0, np.nan)
+stats["Std"] = stats["Std"].replace(
+    0,
+    np.nan
+)
 
+# =========================================================
+# CP
+# =========================================================
 stats["Cp"] = (
-    (stats["USL"] - stats["LSL"]) /
-    (6 * stats["Std"])
+    (
+        stats["USL"]
+        -
+        stats["LSL"]
+    )
+    /
+    (
+        6
+        *
+        stats["Std"]
+    )
 )
 
+# =========================================================
+# CPK
+# =========================================================
 stats["Cpk"] = np.minimum(
-    (stats["USL"] - stats["Mean"]) /
-    (3 * stats["Std"]),
 
-    (stats["Mean"] - stats["LSL"]) /
-    (3 * stats["Std"])
+    (
+        stats["USL"]
+        -
+        stats["Mean"]
+    )
+    /
+    (
+        3
+        *
+        stats["Std"]
+    ),
+
+    (
+        stats["Mean"]
+        -
+        stats["LSL"]
+    )
+    /
+    (
+        3
+        *
+        stats["Std"]
+    )
 )
 
-# =========================
+# =========================================================
 # OOS
-# =========================
-above = df[df["Value"] > df["USL"]] \
-    .groupby("Characteristic")["Value"] \
+# =========================================================
+above = (
+    df[df["Value"] > df["USL"]]
+    .groupby("Characteristic")["Value"]
     .count()
+)
 
-below = df[df["Value"] < df["LSL"]] \
-    .groupby("Characteristic")["Value"] \
+below = (
+    df[df["Value"] < df["LSL"]]
+    .groupby("Characteristic")["Value"]
     .count()
+)
 
-stats["Above OOS"] = stats["Characteristic"] \
-    .map(above) \
-    .fillna(0) \
+stats["Above OOS"] = (
+    stats["Characteristic"]
+    .map(above)
+    .fillna(0)
     .astype(int)
+)
 
-stats["Below OOS"] = stats["Characteristic"] \
-    .map(below) \
-    .fillna(0) \
+stats["Below OOS"] = (
+    stats["Characteristic"]
+    .map(below)
+    .fillna(0)
     .astype(int)
+)
 
-# =========================
+# =========================================================
 # PROCESS CAPABILITY
-# =========================
+# =========================================================
 def process_capability(cpk):
 
     if pd.isna(cpk):
@@ -329,13 +528,14 @@ def process_capability(cpk):
 
     return "Not capable"
 
-stats["Process Capability"] = stats["Cpk"].apply(
-    process_capability
+stats["Process Capability"] = (
+    stats["Cpk"]
+    .apply(process_capability)
 )
 
-# =========================
-# STYLE TABLE
-# =========================
+# =========================================================
+# TABLE STYLE
+# =========================================================
 def style_table(df_style):
 
     s = pd.DataFrame(
@@ -376,23 +576,26 @@ def style_table(df_style):
 
     return s
 
-# =========================
-# SUMMARY
-# =========================
+# =========================================================
+# SUMMARY TABLE
+# =========================================================
 st.subheader("SPC Summary")
 
 st.dataframe(
-    stats.style.apply(style_table, axis=None),
+    stats.style.apply(
+        style_table,
+        axis=None
+    ),
     use_container_width=True
 )
 
-# =========================
-# MEASUREMENT POINT
-# =========================
+# =========================================================
+# CHARACTERISTIC
+# =========================================================
 st.markdown("## Measurement Point")
 
 char = st.selectbox(
-    "Select characteristic",
+    "Select Characteristic",
     stats["Characteristic"]
 )
 
@@ -406,15 +609,15 @@ spec = stats[
 
 values = data["Value"].dropna()
 
-# =========================
+# =========================================================
 # CHARTS
-# =========================
-c1, c2 = st.columns(2)
+# =========================================================
+col1, col2 = st.columns(2)
 
-# =========================
+# =========================================================
 # CONTROL CHART
-# =========================
-with c1:
+# =========================================================
+with col1:
 
     fig, ax = plt.subplots(
         figsize=(6, 4)
@@ -430,33 +633,40 @@ with c1:
     ax.axhline(
         spec["Mean"],
         color="green",
-        linewidth=2
+        linewidth=2,
+        label="Mean"
     )
 
     ax.axhline(
         spec["USL"],
         color="red",
         linestyle="--",
-        linewidth=2
+        linewidth=2,
+        label="USL"
     )
 
     ax.axhline(
         spec["LSL"],
         color="orange",
         linestyle="--",
-        linewidth=2
+        linewidth=2,
+        label="LSL"
     )
 
-    ax.set_title("Control Chart")
+    ax.set_title(
+        f"Control Chart - {char}"
+    )
 
     ax.grid(alpha=0.3)
 
+    ax.legend()
+
     st.pyplot(fig)
 
-# =========================
+# =========================================================
 # HISTOGRAM
-# =========================
-with c2:
+# =========================================================
+with col2:
 
     fig, ax = plt.subplots(
         figsize=(6, 4)
@@ -490,7 +700,9 @@ with c2:
             linewidth=2
         )
 
-    ax.set_title("Histogram")
+    ax.set_title(
+        f"Histogram - {char}"
+    )
 
     ax.grid(alpha=0.3)
 
