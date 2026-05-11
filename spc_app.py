@@ -14,7 +14,34 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# AUTH CONFIG (AZURE AD)
+# ACCESS CONTROL (CODE GATE)
+# =========================================================
+ACCESS_CODE = "3161"
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+
+    st.subheader("🔐 Access Required")
+
+    code = st.text_input("Enter access code", type="password")
+
+    if st.button("Enter"):
+
+        if code == ACCESS_CODE:
+            st.session_state.authenticated = True
+            st.success("Access granted")
+            st.rerun()
+
+        else:
+            st.error("Wrong code")
+            st.stop()
+
+    st.stop()
+
+# =========================================================
+# AUTH (Graph API)
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -23,9 +50,6 @@ TENANT_ID = st.secrets["TENANT_ID"]
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
 
-# =========================================================
-# LOGIN (MSAL - SILENT TOKEN)
-# =========================================================
 app = ConfidentialClientApplication(
     CLIENT_ID,
     authority=AUTHORITY,
@@ -36,31 +60,9 @@ token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
     st.error("Authentication failed")
-    st.write(token)
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
-
-# =========================================================
-# USER AUTH (EMAIL CONTROL)
-# =========================================================
-# NOTE: in production, replace with real user info from Azure login flow
-# (preferred_username from delegated auth flow)
-
-user_email = st.sidebar.text_input("Enter your company email")
-
-ALLOWED_USERS = [
-    "camelia-elena.ionica@sig.biz",
-    "roberta.grosu@sig.biz",
-    "quality@company.com"
-]
-
-if user_email and user_email not in ALLOWED_USERS:
-    st.error("❌ Access denied")
-    st.stop()
-
-if user_email:
-    st.sidebar.success(f"Logged in as {user_email}")
 
 # =========================================================
 # SHAREPOINT SITES
@@ -94,8 +96,7 @@ def get_drive(site_id):
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Failed loading drives")
-        st.write(res.text)
+        st.error("Drive error")
         st.stop()
 
     drives = res.json()["value"]
@@ -110,25 +111,23 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER (ROBUST SEARCH)
+# FIND FOLDER (ROBUST)
 # =========================================================
 @st.cache_data
 def find_folder(drive_id, folder_name):
 
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{folder_name}')"
-
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
         st.error("Folder search failed")
-        st.write(res.text)
         st.stop()
 
     items = res.json().get("value", [])
 
-    for item in items:
-        if "folder" in item and item["name"] == folder_name:
-            return item["id"]
+    for i in items:
+        if "folder" in i and i["name"] == folder_name:
+            return i["id"]
 
     st.error("Folder not found")
     st.stop()
@@ -142,12 +141,10 @@ def list_files(drive_id, folder_name):
     folder_id = find_folder(drive_id, folder_name)
 
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
-
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Cannot read folder content")
-        st.write(res.text)
+        st.error("Cannot load files")
         st.stop()
 
     return res.json().get("value", [])
@@ -155,12 +152,12 @@ def list_files(drive_id, folder_name):
 files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
 
 # =========================================================
-# FILE SELECTION
+# FILES
 # =========================================================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
     "Dataset 1": "Test-Measurements&Specs1.xlsx",
-    "Dataset 2": "Test-Measurements&Specs2.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx"
 }
 
 selected_dataset = st.sidebar.selectbox(
@@ -180,7 +177,6 @@ def get_file_id(file_name):
             return f["id"]
 
     st.error("File not found")
-    st.write([f["name"] for f in files_in_folder])
     st.stop()
 
 file_id = get_file_id(selected_file)
@@ -191,12 +187,10 @@ file_id = get_file_id(selected_file)
 def download_file(file_id):
 
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
-
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
         st.error("Download failed")
-        st.write(res.text)
         st.stop()
 
     return BytesIO(res.content)
@@ -277,7 +271,6 @@ stats = pd.DataFrame({
 stats["Std"] = stats["Std"].replace(0, np.nan)
 
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
-
 stats["Cpk"] = np.minimum(
     (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
@@ -312,7 +305,6 @@ stats["Process Capability"] = stats["Cpk"].apply(capability)
 # OUTPUT
 # =========================================================
 st.subheader("SPC Summary")
-
 st.dataframe(stats, use_container_width=True)
 
 st.markdown("## Measurement Point")
@@ -331,7 +323,6 @@ with col1:
     ax.axhline(spec["Mean"], color="green")
     ax.axhline(spec["USL"], color="red", linestyle="--")
     ax.axhline(spec["LSL"], color="orange", linestyle="--")
-    ax.set_title("Control Chart")
     st.pyplot(fig)
 
 with col2:
@@ -342,5 +333,4 @@ with col2:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
-    ax.set_title("Histogram")
     st.pyplot(fig)
