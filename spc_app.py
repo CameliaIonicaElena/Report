@@ -104,6 +104,7 @@ def get_drive(site_id):
 
     if res.status_code != 200:
         st.error("Failed loading drives")
+        st.write(res.text)
         st.stop()
 
     drives = res.json()["value"]
@@ -115,23 +116,36 @@ def get_drive(site_id):
     return drives[0]
 
 drive = get_drive(SITE_ID)
+
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# GET ROOT ITEMS
+# FIND FOLDER
 # =========================================================
 @st.cache_data
-def get_root_items(drive_id):
+def find_folder(drive_id, folder_name):
 
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{folder_name}')"
 
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Cannot load root")
+        st.error(f"Folder search failed: {folder_name}")
+        st.write(res.text)
         st.stop()
 
-    return res.json().get("value", [])
+    items = res.json().get("value", [])
+
+    for item in items:
+
+        if (
+            "folder" in item and
+            item["name"] == folder_name
+        ):
+            return item
+
+    st.error(f"Folder not found: {folder_name}")
+    st.stop()
 
 # =========================================================
 # GET CHILDREN
@@ -145,31 +159,40 @@ def get_children(drive_id, item_id):
 
     if res.status_code != 200:
         st.error("Cannot load folder content")
+        st.write(res.text)
         st.stop()
 
     return res.json().get("value", [])
 
 # =========================================================
-# STEP 1 → QUALITY FILES EXCHANGE
+# STEP 1 → FIND QUALITY FILES EXCHANGE
 # =========================================================
-root_items = get_root_items(DRIVE_ID)
-
-qfe_folder = next(
-    f for f in root_items
-    if f["name"] == "Quality Files Exchange"
+qfe_folder = find_folder(
+    DRIVE_ID,
+    "Quality Files Exchange"
 )
 
 QFE_ID = qfe_folder["id"]
 
 # =========================================================
-# STEP 2 → AUTO SELECT 2026
+# STEP 2 → OPEN 2026 AUTOMATICALLY
 # =========================================================
-qfe_children = get_children(DRIVE_ID, QFE_ID)
+qfe_children = get_children(
+    DRIVE_ID,
+    QFE_ID
+)
 
 year_folder = next(
-    f for f in qfe_children
-    if f["name"] == "2026"
+    (
+        f for f in qfe_children
+        if f["name"] == "2026"
+    ),
+    None
 )
+
+if year_folder is None:
+    st.error("2026 folder not found")
+    st.stop()
 
 YEAR_ID = year_folder["id"]
 
@@ -181,23 +204,31 @@ line_items = [
     if "folder" in x
 ]
 
+if len(line_items) == 0:
+    st.error("No line folders found inside 2026")
+    st.stop()
+
 selected_line = st.sidebar.selectbox(
     "Select Line",
     [l["name"] for l in line_items]
 )
 
 LINE_ID = next(
-    l["id"] for l in line_items
+    l["id"]
+    for l in line_items
     if l["name"] == selected_line
 )
 
 # =========================================================
-# STEP 4 → FILES
+# STEP 4 → FILES INSIDE LINE
 # =========================================================
-files_in_folder = get_children(DRIVE_ID, LINE_ID)
+files_in_folder = get_children(
+    DRIVE_ID,
+    LINE_ID
+)
 
 # =========================================================
-# DATASETS
+# DATASET SELECTION
 # =========================================================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
@@ -238,6 +269,7 @@ def download_file(file_id):
 
     if res.status_code != 200:
         st.error("Download failed")
+        st.write(res.text)
         st.stop()
 
     return BytesIO(res.content)
@@ -247,11 +279,17 @@ excel = download_file(file_id)
 # =========================================================
 # LOAD DATA
 # =========================================================
-df_meas = pd.read_excel(excel, sheet_name="Measurements")
+df_meas = pd.read_excel(
+    excel,
+    sheet_name="Measurements"
+)
 
 excel.seek(0)
 
-df_specs = pd.read_excel(excel, sheet_name="Specs")
+df_specs = pd.read_excel(
+    excel,
+    sheet_name="Specs"
+)
 
 df_meas.columns = df_meas.columns.str.strip()
 df_specs.columns = df_specs.columns.str.strip()
@@ -262,7 +300,12 @@ df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 # TRANSFORM
 # =========================================================
 df_long = df_meas.melt(
-    id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
+    id_vars=[
+        "DATE",
+        "RAW MATERIAL",
+        "COLOR",
+        "CAV"
+    ],
     var_name="Characteristic",
     value_name="Value"
 )
@@ -280,7 +323,10 @@ st.sidebar.header("Filters")
 
 start_date, end_date = st.sidebar.date_input(
     "Date Range",
-    value=(df["DATE"].min(), df["DATE"].max())
+    value=(
+        df["DATE"].min(),
+        df["DATE"].max()
+    )
 )
 
 df = df[
@@ -288,8 +334,13 @@ df = df[
     (df["DATE"] <= pd.to_datetime(end_date))
 ]
 
-materials = sorted(df["RAW MATERIAL"].dropna().unique())
-colors = sorted(df["COLOR"].dropna().unique())
+materials = sorted(
+    df["RAW MATERIAL"].dropna().unique()
+)
+
+colors = sorted(
+    df["COLOR"].dropna().unique()
+)
 
 selected_rm = st.sidebar.multiselect(
     "Raw Material",
@@ -311,8 +362,15 @@ df = df[
 # =========================================================
 # LIMITS
 # =========================================================
-df["USL"] = df["Target"] + df["Upper Dev"]
-df["LSL"] = df["Target"] + df["Lower Dev"]
+df["USL"] = (
+    df["Target"] +
+    df["Upper Dev"]
+)
+
+df["LSL"] = (
+    df["Target"] +
+    df["Lower Dev"]
+)
 
 # =========================================================
 # STATS
@@ -330,7 +388,10 @@ stats = pd.DataFrame({
     "Count": g["Value"].count()
 }).reset_index(drop=True)
 
-stats["Std"] = stats["Std"].replace(0, np.nan)
+stats["Std"] = stats["Std"].replace(
+    0,
+    np.nan
+)
 
 stats["Cp"] = (
     (stats["USL"] - stats["LSL"]) /
@@ -338,26 +399,37 @@ stats["Cp"] = (
 )
 
 stats["Cpk"] = np.minimum(
-    (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
-    (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
+    (stats["USL"] - stats["Mean"]) /
+    (3 * stats["Std"]),
+
+    (stats["Mean"] - stats["LSL"]) /
+    (3 * stats["Std"])
 )
 
 # =========================================================
 # OOS
 # =========================================================
-above = df[df["Value"] > df["USL"]].groupby(
+above = df[
+    df["Value"] > df["USL"]
+].groupby(
     "Characteristic"
 )["Value"].count()
 
-below = df[df["Value"] < df["LSL"]].groupby(
+below = df[
+    df["Value"] < df["LSL"]
+].groupby(
     "Characteristic"
 )["Value"].count()
 
-stats["Above OOS"] = stats["Characteristic"].map(
+stats["Above OOS"] = stats[
+    "Characteristic"
+].map(
     above
 ).fillna(0).astype(int)
 
-stats["Below OOS"] = stats["Characteristic"].map(
+stats["Below OOS"] = stats[
+    "Characteristic"
+].map(
     below
 ).fillna(0).astype(int)
 
@@ -380,14 +452,20 @@ def capability(cpk):
 
     return "Not capable"
 
-stats["Process Capability"] = stats["Cpk"].apply(capability)
+stats["Process Capability"] = stats[
+    "Cpk"
+].apply(capability)
 
 # =========================================================
 # STYLE TABLE
 # =========================================================
 def style(df):
 
-    s = pd.DataFrame("", index=df.index, columns=df.columns)
+    s = pd.DataFrame(
+        "",
+        index=df.index,
+        columns=df.columns
+    )
 
     s.loc[
         df["Above OOS"] > 0,
@@ -441,7 +519,9 @@ char = st.selectbox(
     stats["Characteristic"]
 )
 
-data = df[df["Characteristic"] == char]
+data = df[
+    df["Characteristic"] == char
+]
 
 spec = stats[
     stats["Characteristic"] == char
