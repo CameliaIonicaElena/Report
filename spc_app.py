@@ -77,9 +77,10 @@ sites = {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
         "folder": "Measurements-test files"
     },
-    "ALPLA Waidhofen": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
-        "folder": "Quality Files Exchange/Measurements-test files"
+   "ALPLA Waidhofen": {
+    "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
+    "folder": "Quality Files Exchange/2026/Measurements-test files"
+}
     }
 }
 
