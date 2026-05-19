@@ -55,7 +55,7 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# STYLED HEADERS
+# UI STYLES
 # =========================================================
 def blue_title(text, size=28):
     st.markdown(
@@ -113,7 +113,7 @@ drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE PATH NAVIGATION (IMPORTANT FIX)
+# SAFE PATH NAVIGATION
 # =========================================================
 def list_folder(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
@@ -121,7 +121,6 @@ def list_folder(path):
 
     if r.status_code != 200:
         st.error(f"Folder not found: {path}")
-        st.error(r.text)
         st.stop()
 
     return r.json().get("value", [])
@@ -287,13 +286,13 @@ def style(df):
     return s
 
 # =========================================================
-# UI
+# UI HEADER
 # =========================================================
 section_title("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 st.markdown(
-    "<h2 style='color:#A7C7E7; font-size:28px;'>Please select one Measurement Point</h2>",
+    "<h2 style='color:#A7C7E7; font-size:30px;'>Please select one Measurement Point</h2>",
     unsafe_allow_html=True
 )
 
@@ -304,7 +303,7 @@ spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
 # =========================================================
-# CHARTS (LEGENDS BELOW BOTH)
+# CHARTS
 # =========================================================
 col1, col2 = st.columns(2)
 
@@ -327,11 +326,11 @@ with col2:
     st.markdown("### Distribution")
 
     fig, ax = plt.subplots()
-    ax.hist(values, bins=20, density=True, alpha=0.6, color="blue")
+    ax.hist(values, bins=20, density=True, alpha=0.6, color="#A7C7E7")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="pink")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
 
     ax.set_title(f"Distribution - {char}")
     ax.grid()
