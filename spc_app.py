@@ -8,7 +8,7 @@ import requests
 from io import BytesIO
 
 # =========================================================
-# APP SETUP
+# APP
 # =========================================================
 st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
@@ -34,7 +34,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# MS GRAPH AUTH
+# GRAPH AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -67,7 +67,7 @@ site_name = st.sidebar.selectbox("Site", list(sites.keys()))
 site_path = sites[site_name]
 
 # =========================================================
-# GET SITE ID
+# SITE ID (STABLE GRAPH FORMAT)
 # =========================================================
 def get_site_id():
     url = f"https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:{site_path}"
@@ -98,7 +98,7 @@ drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE PATH READER
+# SAFE PATH LISTING (IMPORTANT FIX)
 # =========================================================
 def list_folder(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
@@ -111,12 +111,12 @@ def list_folder(path):
 
     return r.json()["value"]
 
-# =========================================================
-# BASE STRUCTURE
-# =========================================================
 BASE = "Quality Files Exchange"
 YEAR = "2026"
 
+# =========================================================
+# YEAR
+# =========================================================
 year_children = list_folder(BASE)
 year_folder = next((x for x in year_children if x["name"] == YEAR), None)
 
@@ -149,7 +149,7 @@ file_path = f"{BASE}/{YEAR}/{selected_line}/{file_name}"
 # =========================================================
 # DOWNLOAD FILE
 # =========================================================
-def download_file(path):
+def download(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/content"
     r = requests.get(url, headers=headers)
 
@@ -159,7 +159,7 @@ def download_file(path):
 
     return BytesIO(r.content)
 
-excel = download_file(file_path)
+excel = download(file_path)
 
 # =========================================================
 # LOAD DATA
@@ -173,6 +173,9 @@ df_specs.columns = df_specs.columns.str.strip()
 
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
+# =========================================================
+# TRANSFORM
+# =========================================================
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
@@ -200,7 +203,7 @@ df = df[
 ]
 
 # =========================================================
-# SPC CALC
+# LIMITS + STATS
 # =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
@@ -226,32 +229,42 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
+# OOS
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+
 # =========================================================
-# CAPABILITY
+# CAPABILITY TEXT
 # =========================================================
-def capability(x):
-    if pd.isna(x):
+def capability(cpk):
+    if pd.isna(cpk):
         return "No data"
-    if x >= 1.67:
+    if cpk >= 1.67:
         return "Excellent"
-    if x >= 1.33:
+    if cpk >= 1.33:
         return "Capable"
-    if x >= 1:
+    if cpk >= 1:
         return "Marginal"
     return "Not capable"
 
-stats["Capability"] = stats["Cpk"].apply(capability)
+stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# STYLE TABLE (COLOR + BOLD)
+# STYLE (FULL COLOR + BOLD BACK)
 # =========================================================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    s.loc[df["Capability"] == "Excellent", "Capability"] = "color:green;font-weight:bold"
-    s.loc[df["Capability"] == "Capable", "Capability"] = "color:goldenrod;font-weight:bold"
-    s.loc[df["Capability"] == "Marginal", "Capability"] = "color:orange;font-weight:bold"
-    s.loc[df["Capability"] == "Not capable", "Capability"] = "color:red;font-weight:bold"
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+
+    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
+    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
 
     return s
 
@@ -259,49 +272,40 @@ st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================================================
-# CHARTS
+# CHART (RESTORED DESIGN)
 # =========================================================
-st.markdown("## Measurement Point")
-
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
-spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
-col1, col2 = st.columns(2)
+spec = stats[stats["Characteristic"] == char].iloc[0]
+
+fig, ax = plt.subplots()
+
+ax.plot(values.values, label="Values", color="blue")
+ax.axhline(spec["Mean"], color="black", linewidth=2, label="Mean")
+ax.axhline(spec["USL"], color="red", linestyle="--", linewidth=2, label="USL")
+ax.axhline(spec["LSL"], color="red", linestyle="--", linewidth=2, label="LSL")
+
+ax.fill_between(range(len(values)), spec["LSL"], spec["USL"], color="green", alpha=0.08)
+
+ax.legend()
+ax.grid(True)
+
+st.pyplot(fig)
 
 # =========================================================
-# TREND CHART
+# HISTOGRAM (RESTORED NICE)
 # =========================================================
-with col1:
-    fig, ax = plt.subplots()
+fig, ax = plt.subplots()
 
-    ax.plot(values.values, label="Values", linewidth=2)
-    ax.axhline(spec["Mean"], label="Mean", linewidth=2)
-    ax.axhline(spec["USL"], linestyle="--", label="USL")
-    ax.axhline(spec["LSL"], linestyle="--", label="LSL")
+ax.hist(values, bins=20, density=True, alpha=0.6, color="gray")
 
-    ax.set_title(f"{char} Trend")
-    ax.legend()
-    ax.grid(alpha=0.3)
+if len(values) > 1:
+    x = np.linspace(values.min(), values.max(), 100)
+    ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="blue")
 
-    st.pyplot(fig)
+ax.grid(True)
 
-# =========================================================
-# DISTRIBUTION CHART
-# =========================================================
-with col2:
-    fig, ax = plt.subplots()
-
-    ax.hist(values, bins=20, density=True, alpha=0.6, label="Distribution")
-
-    if len(values) > 1:
-        x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), label="Normal Fit")
-
-    ax.set_title("Distribution")
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    st.pyplot(fig)
+st.pyplot(fig)
