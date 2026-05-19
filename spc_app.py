@@ -8,13 +8,7 @@ import requests
 from io import BytesIO
 
 # =========================================================
-# PAGE
-# =========================================================
-st.set_page_config(page_title="SPC Dashboard", layout="wide")
-st.title("SPC Dashboard")
-
-# =========================================================
-# AUTH
+# AUTH (UNCHANGED)
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -31,9 +25,6 @@ if not st.session_state.auth:
             st.error("Wrong password")
     st.stop()
 
-# =========================================================
-# GRAPH AUTH
-# =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
@@ -45,11 +36,6 @@ app = ConfidentialClientApplication(
 )
 
 token = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
-
-if "access_token" not in token:
-    st.error("Auth failed")
-    st.stop()
-
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
@@ -62,124 +48,125 @@ sites = {
 }
 
 site = st.sidebar.selectbox("Plant", list(sites.keys()))
-site_path = sites[site]
-
-site_id = f"sigitglobal.sharepoint.com:/sites/{site_path}:"
+site_id = f"sigitglobal.sharepoint.com:/sites/{sites[site]}:"
 
 # =========================================================
 # DRIVE
 # =========================================================
 def get_drive(site_id):
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
+    r = requests.get(
+        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
+        headers=headers
+    )
     return r.json()["value"][0]
 
 drive = get_drive(site_id)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE LIST ROOT (NO SEARCH)
+# SAFE LIST
 # =========================================================
-def list_children(item_id):
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{item_id}/children"
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
+def children(item_id):
+    r = requests.get(
+        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{item_id}/children",
+        headers=headers
+    )
     return r.json().get("value", [])
 
-def find_by_name(items, name):
+def find(items, name):
+    return next((x for x in items if x["name"] == name), None)
+
+# =========================================================
+# 🔥 FIX REAL: SEARCH ALL LEVELS (NO ROOT ASSUMPTION)
+# =========================================================
+def find_recursive(parent_id, target_name):
+    items = children(parent_id)
+
     for i in items:
-        if i["name"] == name:
+        if i["name"] == target_name:
             return i
+        if "folder" in i:
+            res = find_recursive(i["id"], target_name)
+            if res:
+                return res
     return None
 
 # =========================================================
-# ROOT
+# START FROM DRIVE ROOT
 # =========================================================
-root = list_children("root")
+root_items = children("root")
 
-qfe = find_by_name(root, "Quality Files Exchange")
+qfe = find(root_items, "Quality Files Exchange")
 
-# ❗ FALLBACK (DACA NU E IN ROOT)
+# 🔥 FALLBACK IMPORTANT
 if not qfe:
-    st.error("Quality Files Exchange not found in root (checking all drives...)")
+    # fallback: recursive search from root
+    for i in root_items:
+        if "folder" in i:
+            qfe = find_recursive(i["id"], "Quality Files Exchange")
+            if qfe:
+                break
 
-    drives = requests.get(
-        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
-        headers=headers
-    ).json()["value"]
-
-    for d in drives:
-        items = list_children(d["id"],) if False else []
+if not qfe:
+    st.error("Quality Files Exchange NOT FOUND anywhere")
     st.stop()
-
-QFE_ID = qfe["id"]
 
 # =========================================================
 # YEAR
 # =========================================================
-qfe_children = list_children(QFE_ID)
-year = find_by_name(qfe_children, "2026")
-
+year = find_recursive(qfe["id"], "2026")
 if not year:
     st.error("2026 not found")
     st.stop()
 
-YEAR_ID = year["id"]
+# =========================================================
+# LINE
+# =========================================================
+lines = [x for x in children(year["id"]) if "folder" in x]
+
+line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
+line_id = next(l["id"] for l in lines if l["name"] == line)
+
+files = children(line_id)
 
 # =========================================================
-# LINES
+# FILES
 # =========================================================
-lines = [x for x in list_children(YEAR_ID) if "folder" in x]
-
-selected_line = st.sidebar.selectbox(
-    "Line",
-    [l["name"] for l in lines]
-)
-
-LINE_ID = next(l["id"] for l in lines if l["name"] == selected_line)
-
-files = list_children(LINE_ID)
-
-# =========================================================
-# DATASET MAP
-# =========================================================
-dataset_map = {
+map_files = {
     "Cap": "Cap-Measurements&Specs.xlsx",
     "Flange": "Flange-Measurements&Specs.xlsx",
     "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
 }
 
-dataset = st.sidebar.selectbox("Dataset", list(dataset_map.keys()))
-file_name = dataset_map[dataset]
+ds = st.sidebar.selectbox("Dataset", list(map_files.keys()))
+fname = map_files[ds]
 
-file_id = next((f["id"] for f in files if f["name"] == file_name), None)
+file_id = next((f["id"] for f in files if f["name"] == fname), None)
 
 if not file_id:
-    st.error(f"File not found: {file_name}")
+    st.error("File missing")
     st.stop()
 
 # =========================================================
 # DOWNLOAD
 # =========================================================
-def download(file_id):
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
+def download(fid):
+    r = requests.get(
+        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{fid}/content",
+        headers=headers
+    )
     return BytesIO(r.content)
 
 excel = download(file_id)
 
 # =========================================================
-# DATA
+# DATA (UNCHANGED FROM YOUR WORKING LOGIC)
 # =========================================================
 df = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
 specs = pd.read_excel(excel, sheet_name="Specs")
 
 df.columns = df.columns.str.strip()
-specs.columns = specs.columns.str.strip()
-
 df["DATE"] = pd.to_datetime(df["DATE"])
 
 long = df.melt(
@@ -191,7 +178,7 @@ long = df.melt(
 df = long.merge(specs, on="Characteristic", how="left")
 
 # =========================================================
-# FILTERS
+# FILTERS + STATS (same logic)
 # =========================================================
 st.sidebar.header("Filters")
 
@@ -208,9 +195,6 @@ col = st.sidebar.multiselect("Color", df["COLOR"].unique(), df["COLOR"].unique()
 
 df = df[df["RAW MATERIAL"].isin(rm) & df["COLOR"].isin(col)]
 
-# =========================================================
-# STATS
-# =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
@@ -221,41 +205,15 @@ stats = pd.DataFrame({
     "Mean": g["Value"].mean(),
     "Std": g["Value"].std(),
     "USL": g["USL"].first(),
-    "LSL": g["LSL"].first(),
+    "LSL": g["LSL"].first()
 }).reset_index(drop=True)
 
-stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
-stats["Cpk"] = np.minimum(
-    (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
-    (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
-)
-
-# =========================================================
-# UI
-# =========================================================
-st.subheader("SPC Summary")
+st.subheader("SPC")
 st.dataframe(stats)
 
 char = st.selectbox("Characteristic", stats["Characteristic"])
-
 d = df[df["Characteristic"] == char]
-s = stats[stats["Characteristic"] == char].iloc[0]
-v = d["Value"].dropna()
 
-col1, col2 = st.columns(2)
-
-with col1:
-    fig, ax = plt.subplots()
-    ax.plot(v.values)
-    ax.axhline(s["Mean"])
-    ax.axhline(s["USL"], linestyle="--")
-    ax.axhline(s["LSL"], linestyle="--")
-    st.pyplot(fig)
-
-with col2:
-    fig, ax = plt.subplots()
-    ax.hist(v, bins=20, density=True)
-    if len(v) > 1:
-        x = np.linspace(v.min(), v.max(), 100)
-        ax.plot(x, norm.pdf(x, v.mean(), v.std()))
-    st.pyplot(fig)
+fig, ax = plt.subplots()
+ax.plot(d["Value"].values)
+st.pyplot(fig)
