@@ -217,9 +217,9 @@ else:
 # FILE SELECTION
 # =========================================================
 files = {
-    "Cap": "Test-Measurements&Specs.xlsx",
-    "Flange": "Test-Measurements&Specs1.xlsx",
-    "Cutting Ring": "Test-Measurements&Specs2.xlsx"
+    "Cap": "Cap-Measurements&Specs.xlsx",
+    "Flange": "Flange-Measurements&Specs.xlsx",
+    "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
 }
 
 selected_dataset = st.sidebar.selectbox(
