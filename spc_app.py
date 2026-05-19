@@ -8,7 +8,13 @@ import requests
 from io import BytesIO
 
 # =========================================================
-# AUTH (UNCHANGED)
+# PAGE
+# =========================================================
+st.set_page_config(page_title="SPC Dashboard", layout="wide")
+st.title("SPC Dashboard")
+
+# =========================================================
+# PASSWORD
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -16,15 +22,22 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    pwd = st.text_input("Password", type="password")
+    st.subheader("Confidential Data - Access Required")
+    pwd = st.text_input("Enter password", type="password")
+
     if st.button("Login"):
         if pwd == PASSWORD:
             st.session_state.auth = True
             st.rerun()
         else:
             st.error("Wrong password")
+            st.stop()
+
     st.stop()
 
+# =========================================================
+# AUTH MICROSOFT GRAPH
+# =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
@@ -35,7 +48,12 @@ app = ConfidentialClientApplication(
     client_credential=CLIENT_SECRET
 )
 
-token = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
+token = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+
+if "access_token" not in token:
+    st.error("Auth failed")
+    st.stop()
+
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
@@ -47,173 +65,165 @@ sites = {
     "ALPLA WAIDHOFEN": "GLB-Quality-Alpla_Waidhofen"
 }
 
-site = st.sidebar.selectbox("Plant", list(sites.keys()))
-site_id = f"sigitglobal.sharepoint.com:/sites/{sites[site]}:"
+site_name = st.sidebar.selectbox("Site", list(sites.keys()))
+site_path = sites[site_name]
 
 # =========================================================
-# DRIVE
+# GET DEFAULT DRIVE (IMPORTANT FIX)
 # =========================================================
-def get_drive(site_id):
-    r = requests.get(
-        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
-        headers=headers
-    )
-    return r.json()["value"][0]
+def get_drive():
+    url = f"https://graph.microsoft.com/v1.0/sites/{site_path}/drive"
+    r = requests.get(url, headers=headers)
+    if r.status_code != 200:
+        st.error(r.text)
+        st.stop()
+    return r.json()
 
-drive = get_drive(site_id)
+drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE LIST
+# PATH BASED ACCESS (NO SEARCH ANYMORE)
 # =========================================================
-def children(item_id):
-    r = requests.get(
-        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{item_id}/children",
-        headers=headers
-    )
-    return r.json().get("value", [])
+BASE_FOLDER = "Quality Files Exchange"
+YEAR = "2026"
 
-def find(items, name):
-    return next((x for x in items if x["name"] == name), None)
+def get_children_by_path(path):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
+    r = requests.get(url, headers=headers)
 
-# =========================================================
-# 🔥 FIX REAL: SEARCH ALL LEVELS (NO ROOT ASSUMPTION)
-# =========================================================
-def find_recursive(parent_id, target_name):
-    items = children(parent_id)
+    if r.status_code != 200:
+        st.error(f"Path error: {path}")
+        st.error(r.text)
+        st.stop()
 
-    for i in items:
-        if i["name"] == target_name:
-            return i
-        if "folder" in i:
-            res = find_recursive(i["id"], target_name)
-            if res:
-                return res
-    return None
+    return r.json()["value"]
 
 # =========================================================
-# START FROM DRIVE ROOT
+# YEAR LEVEL
 # =========================================================
-root_items = children("root")
+year_children = get_children_by_path(BASE_FOLDER)
+year_folder = next((x for x in year_children if x["name"] == YEAR), None)
 
-qfe = find(root_items, "Quality Files Exchange")
-
-# 🔥 FALLBACK IMPORTANT
-if not qfe:
-    # fallback: recursive search from root
-    for i in root_items:
-        if "folder" in i:
-            qfe = find_recursive(i["id"], "Quality Files Exchange")
-            if qfe:
-                break
-
-if not qfe:
-    st.error("Quality Files Exchange NOT FOUND anywhere")
+if not year_folder:
+    st.error("2026 folder missing")
     st.stop()
 
 # =========================================================
-# YEAR
+# LINE LEVEL
 # =========================================================
-year = find_recursive(qfe["id"], "2026")
-if not year:
-    st.error("2026 not found")
-    st.stop()
+line_children = get_children_by_path(f"{BASE_FOLDER}/{YEAR}")
 
-# =========================================================
-# LINE
-# =========================================================
-lines = [x for x in children(year["id"]) if "folder" in x]
+lines = [x for x in line_children if "folder" in x]
 
-line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
-line_id = next(l["id"] for l in lines if l["name"] == line)
-
-files = children(line_id)
+selected_line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
+LINE = selected_line
 
 # =========================================================
 # FILES
 # =========================================================
-map_files = {
+files = {
     "Cap": "Cap-Measurements&Specs.xlsx",
     "Flange": "Flange-Measurements&Specs.xlsx",
     "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
 }
 
-ds = st.sidebar.selectbox("Dataset", list(map_files.keys()))
-fname = map_files[ds]
+selected_dataset = st.sidebar.selectbox("Dataset", list(files.keys()))
+selected_file = files[selected_dataset]
 
-file_id = next((f["id"] for f in files if f["name"] == fname), None)
+file_path = f"{BASE_FOLDER}/{YEAR}/{LINE}/{selected_file}"
 
-if not file_id:
-    st.error("File missing")
-    st.stop()
+def download_file(path):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/content"
+    r = requests.get(url, headers=headers)
 
-# =========================================================
-# DOWNLOAD
-# =========================================================
-def download(fid):
-    r = requests.get(
-        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{fid}/content",
-        headers=headers
-    )
+    if r.status_code != 200:
+        st.error("Download failed")
+        st.error(r.text)
+        st.stop()
+
     return BytesIO(r.content)
 
-excel = download(file_id)
+excel = download_file(file_path)
 
 # =========================================================
-# DATA (UNCHANGED FROM YOUR WORKING LOGIC)
+# LOAD DATA
 # =========================================================
-df = pd.read_excel(excel, sheet_name="Measurements")
+df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
-specs = pd.read_excel(excel, sheet_name="Specs")
+df_specs = pd.read_excel(excel, sheet_name="Specs")
 
-df.columns = df.columns.str.strip()
-df["DATE"] = pd.to_datetime(df["DATE"])
+df_meas.columns = df_meas.columns.str.strip()
+df_specs.columns = df_specs.columns.str.strip()
 
-long = df.melt(
+df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
+
+# =========================================================
+# TRANSFORM
+# =========================================================
+df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
     value_name="Value"
 )
 
-df = long.merge(specs, on="Characteristic", how="left")
+df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================================================
-# FILTERS + STATS (same logic)
+# FILTERS
 # =========================================================
-st.sidebar.header("Filters")
-
 start, end = st.sidebar.date_input(
-    "Date",
+    "Date range",
     value=(df["DATE"].min(), df["DATE"].max())
 )
 
-df = df[(df["DATE"] >= pd.to_datetime(start)) &
-        (df["DATE"] <= pd.to_datetime(end))]
+df = df[(df["DATE"] >= pd.to_datetime(start)) & (df["DATE"] <= pd.to_datetime(end))]
 
-rm = st.sidebar.multiselect("Raw Material", df["RAW MATERIAL"].unique(), df["RAW MATERIAL"].unique())
-col = st.sidebar.multiselect("Color", df["COLOR"].unique(), df["COLOR"].unique())
+materials = df["RAW MATERIAL"].dropna().unique()
+colors = df["COLOR"].dropna().unique()
 
-df = df[df["RAW MATERIAL"].isin(rm) & df["COLOR"].isin(col)]
+df = df[
+    df["RAW MATERIAL"].isin(st.sidebar.multiselect("Material", materials, default=materials)) &
+    df["COLOR"].isin(st.sidebar.multiselect("Color", colors, default=colors))
+]
 
+# =========================================================
+# STATS
+# =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
 g = df.groupby("Characteristic")
 
 stats = pd.DataFrame({
-    "Characteristic": g["Value"].count().index,
+    "Characteristic": g["Characteristic"].first(),
+    "USL": g["USL"].first(),
+    "LSL": g["LSL"].first(),
     "Mean": g["Value"].mean(),
     "Std": g["Value"].std(),
-    "USL": g["USL"].first(),
-    "LSL": g["LSL"].first()
+    "Max": g["Value"].max(),
+    "Min": g["Value"].min(),
+    "Count": g["Value"].count()
 }).reset_index(drop=True)
 
-st.subheader("SPC")
+stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
+stats["Cpk"] = np.minimum(
+    (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
+    (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
+)
+
 st.dataframe(stats)
 
+# =========================================================
+# CHART
+# =========================================================
 char = st.selectbox("Characteristic", stats["Characteristic"])
-d = df[df["Characteristic"] == char]
+
+data = df[df["Characteristic"] == char]
+values = data["Value"].dropna()
 
 fig, ax = plt.subplots()
-ax.plot(d["Value"].values)
+ax.plot(values.values)
+ax.axhline(stats.loc[stats["Characteristic"] == char, "USL"].values[0], linestyle="--")
+ax.axhline(stats.loc[stats["Characteristic"] == char, "LSL"].values[0], linestyle="--")
 st.pyplot(fig)
