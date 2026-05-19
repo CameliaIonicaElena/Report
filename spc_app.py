@@ -55,6 +55,21 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
+# STYLED HEADERS
+# =========================================================
+def blue_title(text, size=28):
+    st.markdown(
+        f"<h1 style='color:#A7C7E7; font-size:{size}px; font-weight:700;'>{text}</h1>",
+        unsafe_allow_html=True
+    )
+
+def section_title(text):
+    st.markdown(
+        f"<h2 style='color:#A7C7E7; font-weight:600;'>{text}</h2>",
+        unsafe_allow_html=True
+    )
+
+# =========================================================
 # SITES
 # =========================================================
 sites = {
@@ -98,7 +113,7 @@ drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE PATH
+# SAFE PATH NAVIGATION (IMPORTANT FIX)
 # =========================================================
 def list_folder(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
@@ -106,6 +121,7 @@ def list_folder(path):
 
     if r.status_code != 200:
         st.error(f"Folder not found: {path}")
+        st.error(r.text)
         st.stop()
 
     return r.json().get("value", [])
@@ -113,6 +129,9 @@ def list_folder(path):
 BASE = "Quality Files Exchange"
 YEAR = "2026"
 
+# =========================================================
+# YEAR
+# =========================================================
 year_items = list_folder(BASE)
 year_folder = next((x for x in year_items if x["name"] == YEAR), None)
 
@@ -120,11 +139,14 @@ if not year_folder:
     st.error("2026 not found")
     st.stop()
 
+# =========================================================
+# LINE
+# =========================================================
 lines = list_folder(f"{BASE}/{YEAR}")
 lines = [x for x in lines if "folder" in x]
 
 selected_line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
-LINE = next(l["name"] for l in lines if l["name"] == selected_line)
+LINE = selected_line
 
 # =========================================================
 # FILES
@@ -140,6 +162,9 @@ file_name = files[dataset]
 
 file_path = f"{BASE}/{YEAR}/{LINE}/{file_name}"
 
+# =========================================================
+# DOWNLOAD FILE
+# =========================================================
 def download_file(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/content"
     r = requests.get(url, headers=headers)
@@ -164,6 +189,9 @@ df_specs.columns = df_specs.columns.str.strip()
 
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
+# =========================================================
+# TRANSFORM
+# =========================================================
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
@@ -218,51 +246,96 @@ stats["Cpk"] = np.minimum(
 )
 
 # =========================================================
-# CHART DATA
+# OOS
 # =========================================================
-char = st.selectbox("Characteristic", stats["Characteristic"])
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+
+# =========================================================
+# CAPABILITY
+# =========================================================
+def capability(cpk):
+    if pd.isna(cpk):
+        return "No data"
+    if cpk >= 1.67:
+        return "Excellent"
+    if cpk >= 1.33:
+        return "Capable"
+    if cpk >= 1:
+        return "Marginal"
+    return "Not capable"
+
+stats["Process Capability"] = stats["Cpk"].apply(capability)
+
+# =========================================================
+# STYLE TABLE
+# =========================================================
+def style(df):
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+
+    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
+    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
+
+    return s
+
+# =========================================================
+# UI
+# =========================================================
+section_title("SPC Summary")
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+
+st.markdown(
+    "<h2 style='color:#A7C7E7; font-size:28px;'>Please select one Measurement Point</h2>",
+    unsafe_allow_html=True
+)
+
+char = st.selectbox("", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
+# =========================================================
+# CHARTS (LEGENDS BELOW BOTH)
+# =========================================================
 col1, col2 = st.columns(2)
 
-# =========================================================
-# CHART 1 - TREND
-# =========================================================
 with col1:
-    fig, ax = plt.subplots()
+    st.markdown("### Trend Chart")
 
+    fig, ax = plt.subplots()
     ax.plot(values.values, label="Values", color="blue")
     ax.axhline(spec["Mean"], label="Mean", color="purple")
     ax.axhline(spec["USL"], linestyle="--", label="USL", color="red")
     ax.axhline(spec["LSL"], linestyle="--", label="LSL", color="red")
 
+    ax.set_title(f"Trend - {char}")
     ax.grid()
-    ax.set_title("Trend Chart")
 
-    # ✅ LEGEND SUB GRAFIC (FIX CERUT)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.20), ncol=2)
-
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2)
     st.pyplot(fig)
 
-# =========================================================
-# CHART 2 - DISTRIBUTION
-# =========================================================
 with col2:
-    fig, ax = plt.subplots()
+    st.markdown("### Distribution")
 
-    ax.hist(values, bins=20, density=True, alpha=0.6)
+    fig, ax = plt.subplots()
+    ax.hist(values, bins=20, density=True, alpha=0.6, color="blue")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
 
+    ax.set_title(f"Distribution - {char}")
     ax.grid()
-    ax.set_title("Distribution Chart")
 
-    # ✅ LEGEND SUB GRAFIC (FIX CERUT)
-    ax.legend(["Distribution"], loc="upper center", bbox_to_anchor=(0.5, -0.20), ncol=1)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2))
 
     st.pyplot(fig)
