@@ -8,13 +8,13 @@ import requests
 from io import BytesIO
 
 # =========================================================
-# PAGE
+# APP SETUP
 # =========================================================
 st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# AUTH GATE
+# LOGIN
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -22,8 +22,7 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.subheader("Confidential Data - Access Required")
-    pwd = st.text_input("Enter password", type="password")
+    pwd = st.text_input("Password", type="password")
 
     if st.button("Login"):
         if pwd == PASSWORD:
@@ -31,10 +30,11 @@ if not st.session_state.auth:
             st.rerun()
         else:
             st.error("Wrong password")
+            st.stop()
     st.stop()
 
 # =========================================================
-# MSAL AUTH
+# MS GRAPH AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -55,137 +55,114 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# SITES (SAFE)
+# SITES
 # =========================================================
 sites = {
-    "ALPLA HEFEI": "GLB-Quality-Alpla_Hefei",
-    "ALPLA BRAZIL": "GLB-Quality-Alpla_Brazil",
-    "ALPLA WAIDHOFEN": "GLB-Quality-Alpla_Waidhofen"
+    "ALPLA HEFEI": "/sites/GLB-Quality-Alpla_Hefei",
+    "ALPLA BRAZIL": "/sites/GLB-Quality-Alpla_Brazil",
+    "ALPLA WAIDHOFEN": "/sites/GLB-Quality-Alpla_Waidhofen"
 }
 
 site_name = st.sidebar.selectbox("Site", list(sites.keys()))
 site_path = sites[site_name]
 
 # =========================================================
-# GET SITE ID (FIXED PROPERLY)
+# GET SITE ID
 # =========================================================
-def get_site_id(site_path):
-    url = f"https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:/sites/{site_path}"
+def get_site_id():
+    url = f"https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:{site_path}"
     r = requests.get(url, headers=headers)
+
     if r.status_code != 200:
         st.error(r.text)
         st.stop()
+
     return r.json()["id"]
 
-SITE_ID = get_site_id(site_path)
+SITE_ID = get_site_id()
 
 # =========================================================
-# GET ALL DRIVES (ROBUST)
+# DRIVE
 # =========================================================
-def get_drive(site_id):
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
+def get_drive():
+    url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive"
     r = requests.get(url, headers=headers)
+
+    if r.status_code != 200:
+        st.error(r.text)
+        st.stop()
+
+    return r.json()
+
+drive = get_drive()
+DRIVE_ID = drive["id"]
+
+# =========================================================
+# SAFE PATH READER
+# =========================================================
+def list_folder(path):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
+    r = requests.get(url, headers=headers)
+
+    if r.status_code != 200:
+        st.error(f"Folder not found: {path}")
+        st.error(r.text)
+        st.stop()
+
     return r.json()["value"]
 
-drives = get_drive(SITE_ID)
-DRIVE_ID = drives[0]["id"]
-
 # =========================================================
-# FIND FOLDER ROBUST (NO SEARCH BUGS)
+# BASE STRUCTURE
 # =========================================================
-def find_folder_recursive(drive_id, folder_name):
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
-    r = requests.get(url, headers=headers)
-    items = r.json().get("value", [])
+BASE = "Quality Files Exchange"
+YEAR = "2026"
 
-    for i in items:
-        if i["name"] == folder_name:
-            return i
+year_children = list_folder(BASE)
+year_folder = next((x for x in year_children if x["name"] == YEAR), None)
 
-    # fallback deep search
-    for i in items:
-        if "folder" in i:
-            sub = requests.get(
-                f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{i['id']}/children",
-                headers=headers
-            ).json().get("value", [])
-
-            for s in sub:
-                if s["name"] == folder_name:
-                    return s
-
-    return None
-
-# =========================================================
-# ROOT FOLDER
-# =========================================================
-qfe = find_folder_recursive(DRIVE_ID, "Quality Files Exchange")
-
-if not qfe:
-    st.error("Quality Files Exchange NOT FOUND (even in root children)")
-    st.stop()
-
-QFE_ID = qfe["id"]
-
-# =========================================================
-# YEAR
-# =========================================================
-children = requests.get(
-    f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{QFE_ID}/children",
-    headers=headers
-).json().get("value", [])
-
-year = next((x for x in children if x["name"] == "2026"), None)
-
-if not year:
+if not year_folder:
     st.error("2026 not found")
     st.stop()
 
-YEAR_ID = year["id"]
-
 # =========================================================
-# LINE
+# LINE SELECTION
 # =========================================================
-lines = requests.get(
-    f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{YEAR_ID}/children",
-    headers=headers
-).json().get("value", [])
-
+lines = list_folder(f"{BASE}/{YEAR}")
 lines = [x for x in lines if "folder" in x]
 
 selected_line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
-LINE_ID = next(l["id"] for l in lines if l["name"] == selected_line)
 
 # =========================================================
 # FILES
 # =========================================================
-files_in_folder = requests.get(
-    f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{LINE_ID}/children",
-    headers=headers
-).json().get("value", [])
-
 files = {
     "Cap": "Cap-Measurements&Specs.xlsx",
     "Flange": "Flange-Measurements&Specs.xlsx",
     "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
 }
 
-selected_file = files[st.sidebar.selectbox("Dataset", list(files.keys()))]
+selected_dataset = st.sidebar.selectbox("Dataset", list(files.keys()))
+file_name = files[selected_dataset]
 
-file_id = next(f["id"] for f in files_in_folder if f["name"] == selected_file)
-
-# =========================================================
-# DOWNLOAD
-# =========================================================
-content = requests.get(
-    f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content",
-    headers=headers
-).content
-
-excel = BytesIO(content)
+file_path = f"{BASE}/{YEAR}/{selected_line}/{file_name}"
 
 # =========================================================
-# DATA
+# DOWNLOAD FILE
+# =========================================================
+def download_file(path):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/content"
+    r = requests.get(url, headers=headers)
+
+    if r.status_code != 200:
+        st.error(r.text)
+        st.stop()
+
+    return BytesIO(r.content)
+
+excel = download_file(file_path)
+
+# =========================================================
+# LOAD DATA
 # =========================================================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
@@ -207,17 +184,23 @@ df = df_long.merge(df_specs, on="Characteristic", how="left")
 # =========================================================
 # FILTERS
 # =========================================================
-start, end = st.sidebar.date_input("Date range", (df["DATE"].min(), df["DATE"].max()))
+start, end = st.sidebar.date_input(
+    "Date range",
+    value=(df["DATE"].min(), df["DATE"].max())
+)
 
 df = df[(df["DATE"] >= pd.to_datetime(start)) & (df["DATE"] <= pd.to_datetime(end))]
 
-materials = st.sidebar.multiselect("Material", df["RAW MATERIAL"].dropna().unique(), default=df["RAW MATERIAL"].dropna().unique())
-colors = st.sidebar.multiselect("Color", df["COLOR"].dropna().unique(), default=df["COLOR"].dropna().unique())
+materials = df["RAW MATERIAL"].dropna().unique()
+colors = df["COLOR"].dropna().unique()
 
-df = df[df["RAW MATERIAL"].isin(materials) & df["COLOR"].isin(colors)]
+df = df[
+    df["RAW MATERIAL"].isin(st.sidebar.multiselect("Material", materials, default=materials)) &
+    df["COLOR"].isin(st.sidebar.multiselect("Color", colors, default=colors))
+]
 
 # =========================================================
-# SPC
+# SPC CALC
 # =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
@@ -233,7 +216,9 @@ stats = pd.DataFrame({
     "Max": g["Value"].max(),
     "Min": g["Value"].min(),
     "Count": g["Value"].count()
-})
+}).reset_index(drop=True)
+
+stats["Std"] = stats["Std"].replace(0, np.nan)
 
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
 stats["Cpk"] = np.minimum(
@@ -241,31 +226,43 @@ stats["Cpk"] = np.minimum(
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
-def cap(x):
-    if pd.isna(x): return "No data"
-    if x >= 1.67: return "Excellent"
-    if x >= 1.33: return "Capable"
-    if x >= 1: return "Marginal"
+# =========================================================
+# CAPABILITY
+# =========================================================
+def capability(x):
+    if pd.isna(x):
+        return "No data"
+    if x >= 1.67:
+        return "Excellent"
+    if x >= 1.33:
+        return "Capable"
+    if x >= 1:
+        return "Marginal"
     return "Not capable"
 
-stats["Capability"] = stats["Cpk"].apply(cap)
+stats["Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# UI TABLE STYLE (RESTORED)
+# STYLE TABLE (COLOR + BOLD)
 # =========================================================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
+
     s.loc[df["Capability"] == "Excellent", "Capability"] = "color:green;font-weight:bold"
     s.loc[df["Capability"] == "Capable", "Capability"] = "color:goldenrod;font-weight:bold"
     s.loc[df["Capability"] == "Marginal", "Capability"] = "color:orange;font-weight:bold"
     s.loc[df["Capability"] == "Not capable", "Capability"] = "color:red;font-weight:bold"
+
     return s
 
+st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================================================
-# CHARTS (RESTORED DESIGN)
+# CHARTS
 # =========================================================
+st.markdown("## Measurement Point")
+
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
@@ -274,23 +271,37 @@ values = data["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
+# =========================================================
+# TREND CHART
+# =========================================================
 with col1:
     fig, ax = plt.subplots()
-    ax.plot(values.values, label="Values")
-    ax.axhline(spec["Mean"], label="Mean")
+
+    ax.plot(values.values, label="Values", linewidth=2)
+    ax.axhline(spec["Mean"], label="Mean", linewidth=2)
     ax.axhline(spec["USL"], linestyle="--", label="USL")
     ax.axhline(spec["LSL"], linestyle="--", label="LSL")
+
+    ax.set_title(f"{char} Trend")
     ax.legend()
-    ax.grid()
+    ax.grid(alpha=0.3)
+
     st.pyplot(fig)
 
+# =========================================================
+# DISTRIBUTION CHART
+# =========================================================
 with col2:
     fig, ax = plt.subplots()
-    ax.hist(values, bins=20, density=True, alpha=0.6)
+
+    ax.hist(values, bins=20, density=True, alpha=0.6, label="Distribution")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), label="Normal Fit")
 
-    ax.grid()
+    ax.set_title("Distribution")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
     st.pyplot(fig)
