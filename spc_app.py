@@ -14,7 +14,7 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# AUTH GATE
+# AUTH
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -38,7 +38,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# MSAL AUTH
+# MICROSOFT AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -56,7 +56,7 @@ app = ConfidentialClientApplication(
 token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
-    st.error("Authentication failed")
+    st.error("Auth failed")
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
@@ -74,7 +74,7 @@ plant = st.sidebar.selectbox("Select Plant", list(sites.keys()))
 SITE_ID = sites[plant]
 
 # =========================================================
-# SHAREPOINT DRIVE
+# DRIVE
 # =========================================================
 @st.cache_data
 def get_drive(site_id):
@@ -91,74 +91,74 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# HELPERS
+# SAFE NAVIGATION
 # =========================================================
-@st.cache_data
-def find_folder(drive_id, name):
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{name}')"
-    res = requests.get(url, headers=headers)
-
-    if res.status_code != 200:
-        st.error(f"Search failed: {name}")
-        st.stop()
-
-    for item in res.json().get("value", []):
-        if "folder" in item and item["name"] == name:
-            return item
-
-    st.error(f"Folder not found: {name}")
-    st.stop()
-
-@st.cache_data
-def children(drive_id, item_id):
+def get_children(drive_id, item_id):
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Children error")
+        st.error("Cannot read folder")
+        st.stop()
+
+    return res.json().get("value", [])
+
+def get_root_children(drive_id):
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot read root")
         st.stop()
 
     return res.json().get("value", [])
 
 # =========================================================
-# PATH: Quality Files Exchange → 2026
+# STEP 1: FIND "Quality Files Exchange"
 # =========================================================
-qfe = find_folder(DRIVE_ID, "Quality Files Exchange")
-qfe_id = qfe["id"]
+root = get_root_children(DRIVE_ID)
 
-qfe_children = children(DRIVE_ID, qfe_id)
+qfe = next((x for x in root if x["name"] == "Quality Files Exchange"), None)
 
-year_folder = next((x for x in qfe_children if x["name"] == "2026"), None)
+if not qfe:
+    st.error("Quality Files Exchange not found")
+    st.stop()
 
-if not year_folder:
+QFE_ID = qfe["id"]
+
+# =========================================================
+# STEP 2: AUTO OPEN 2026
+# =========================================================
+qfe_children = get_children(DRIVE_ID, QFE_ID)
+
+year = next((x for x in qfe_children if x["name"] == "2026"), None)
+
+if not year:
     st.error("2026 not found")
     st.stop()
 
-year_id = year_folder["id"]
+YEAR_ID = year["id"]
 
 # =========================================================
-# LINE SELECTION (DYNAMIC PER PLANT)
+# STEP 3: LINE SELECTION (DYNAMIC PER PLANT)
 # =========================================================
-line_items = [
-    x for x in children(DRIVE_ID, year_id)
-    if "folder" in x
-]
+lines = [x for x in get_children(DRIVE_ID, YEAR_ID) if "folder" in x]
 
-if not line_items:
+if not lines:
     st.error("No line folders found")
     st.stop()
 
-line = st.sidebar.selectbox(
+selected_line = st.sidebar.selectbox(
     "Select Line",
-    [l["name"] for l in line_items]
+    [l["name"] for l in lines]
 )
 
-line_id = next(l["id"] for l in line_items if l["name"] == line)
+LINE_ID = next(l["id"] for l in lines if l["name"] == selected_line)
 
 # =========================================================
-# FILES IN LINE
+# STEP 4: FILES
 # =========================================================
-files_in_folder = children(DRIVE_ID, line_id)
+files_in_folder = get_children(DRIVE_ID, LINE_ID)
 
 # =========================================================
 # DATASETS
@@ -183,9 +183,9 @@ def get_file_id(name):
 file_id = get_file_id(file_name)
 
 # =========================================================
-# DOWNLOAD FILE
+# DOWNLOAD
 # =========================================================
-def download(file_id):
+def download_file(file_id):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
     res = requests.get(url, headers=headers)
 
@@ -195,7 +195,7 @@ def download(file_id):
 
     return BytesIO(res.content)
 
-excel = download(file_id)
+excel = download_file(file_id)
 
 # =========================================================
 # LOAD DATA
