@@ -79,7 +79,7 @@ sites = {
     },
     "ALPLA WAIDHOFEN": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
-        "folder": "2026"
+        "folder": "Quality Files Exchange"
     }
 }
 
@@ -116,7 +116,7 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER (UNCHANGED)
+# FIND FOLDER (for simple sites)
 # =========================================================
 @st.cache_data
 def find_folder(drive_id, folder_name):
@@ -138,11 +138,9 @@ def find_folder(drive_id, folder_name):
     st.stop()
 
 # =========================================================
-# LIST FILES (UNCHANGED FOR HEFEI/BRAZIL)
+# DEFAULT FILE LIST (HEFEI + BRAZIL)
 # =========================================================
-@st.cache_data
-def list_files(drive_id, folder_name):
-
+def list_files_simple(drive_id, folder_name):
     folder_id = find_folder(drive_id, folder_name)
 
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
@@ -155,49 +153,54 @@ def list_files(drive_id, folder_name):
     return res.json().get("value", [])
 
 # =========================================================
-# WAIDHOFEN FIX (REAL GRAPH STRUCTURE)
+# WAIDHOFEN STRUCTURE (FULL FIX)
 # =========================================================
 if selected_site == "ALPLA WAIDHOFEN":
 
-    # 1. ROOT → includes "2026"
+    # 1. ROOT → Quality Files Exchange
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Cannot load root folders")
+        st.error("Cannot load root")
         st.stop()
 
     root_items = res.json().get("value", [])
-    root_folders = [x for x in root_items if "folder" in x]
 
-    selected_root = st.sidebar.selectbox(
-        "Folder",
-        [f["name"] for f in root_folders]
-    )
+    qfe = next(f for f in root_items if f["name"] == "Quality Files Exchange")
+    qfe_id = qfe["id"]
 
-    root_folder = next(f for f in root_folders if f["name"] == selected_root)
-    root_id = root_folder["id"]
-
-    # 2. LINES inside 2026
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{root_id}/children"
+    # 2. INSIDE → 2026 (AUTO)
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{qfe_id}/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Cannot load line folders")
+        st.error("Cannot load QFE")
         st.stop()
 
-    line_items = res.json().get("value", [])
-    line_folders = [x for x in line_items if "folder" in x]
+    qfe_children = res.json().get("value", [])
+
+    year_2026 = next(f for f in qfe_children if f["name"] == "2026")
+    year_id = year_2026["id"]
+
+    # 3. LINES
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{year_id}/children"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot load 2026")
+        st.stop()
+
+    lines = [x for x in res.json().get("value", []) if "folder" in x]
 
     selected_line = st.sidebar.selectbox(
-        "Line",
-        [l["name"] for l in line_folders]
+        "Select Line",
+        [l["name"] for l in lines]
     )
 
-    line_folder = next(l for l in line_folders if l["name"] == selected_line)
-    line_id = line_folder["id"]
+    line_id = next(l["id"] for l in lines if l["name"] == selected_line)
 
-    # 3. FILES inside line folder
+    # 4. FILES
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{line_id}/children"
     res = requests.get(url, headers=headers)
 
@@ -208,10 +211,10 @@ if selected_site == "ALPLA WAIDHOFEN":
     files_in_folder = res.json().get("value", [])
 
 else:
-    files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
+    files_in_folder = list_files_simple(DRIVE_ID, FOLDER_NAME)
 
 # =========================================================
-# FILES
+# FILE SELECTION
 # =========================================================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
