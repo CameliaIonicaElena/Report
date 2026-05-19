@@ -43,16 +43,13 @@ CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
 TENANT_ID = st.secrets["TENANT_ID"]
 
-AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
-SCOPES = ["https://graph.microsoft.com/.default"]
-
 app = ConfidentialClientApplication(
     CLIENT_ID,
-    authority=AUTHORITY,
+    authority=f"https://login.microsoftonline.com/{TENANT_ID}",
     client_credential=CLIENT_SECRET
 )
 
-token = app.acquire_token_for_client(scopes=SCOPES)
+token = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
 
 if "access_token" not in token:
     st.error("Auth failed")
@@ -61,7 +58,7 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# PLANTS
+# SITES
 # =========================================================
 sites = {
     "ALPLA HEFEI": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
@@ -84,74 +81,44 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE TREE SEARCH (IMPORTANT FIX)
+# SIMPLE HELPERS (IMPORTANT: NO RECURSIVE SEARCH)
 # =========================================================
-def list_children(folder_id):
+def children(folder_id):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{folder_id}/children"
     r = requests.get(url, headers=headers)
     return r.json().get("value", [])
 
-def get_root():
+def root_children():
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
     r = requests.get(url, headers=headers)
     return r.json().get("value", [])
 
-def find_folder_recursive(start_items, target_name):
-    """search 2 levels deep (fix for inconsistent SharePoint structures)"""
-
-    # level 1
-    for item in start_items:
-        if item.get("name") == target_name and "folder" in item:
-            return item
-
-    # level 2
-    for item in start_items:
-        if "folder" in item:
-            children = list_children(item["id"])
-            for c in children:
-                if c.get("name") == target_name and "folder" in c:
-                    return c
-
-    return None
-
 # =========================================================
-# FIND QUALITY FILES EXCHANGE (ROBUST)
+# STEP 1: FIND 2026 (DIRECT, NOT SEARCH)
 # =========================================================
-root = get_root()
+root = root_children()
 
-qfe = find_folder_recursive(root, "Quality Files Exchange")
+year_folder = next((x for x in root if x["name"] == "2026"), None)
 
-if not qfe:
-    st.error("Quality Files Exchange NOT FOUND (any level)")
+if not year_folder:
+    st.error("Folder 2026 not found in root")
     st.stop()
 
-QFE_ID = qfe["id"]
+YEAR_ID = year_folder["id"]
 
 # =========================================================
-# FIND YEAR 2026
+# STEP 2: LINES
 # =========================================================
-qfe_children = list_children(QFE_ID)
+line_folders = [x for x in children(YEAR_ID) if "folder" in x]
 
-year = next((x for x in qfe_children if x["name"] == "2026"), None)
+line_name = st.sidebar.selectbox("Line", [l["name"] for l in line_folders])
 
-if not year:
-    st.error("2026 not found")
-    st.stop()
-
-YEAR_ID = year["id"]
+LINE_ID = next(l["id"] for l in line_folders if l["name"] == line_name)
 
 # =========================================================
-# LINES
+# STEP 3: FILES
 # =========================================================
-lines = [x for x in list_children(YEAR_ID) if "folder" in x]
-
-line_name = st.sidebar.selectbox("Line", [l["name"] for l in lines])
-LINE_ID = next(l["id"] for l in lines if l["name"] == line_name)
-
-# =========================================================
-# FILES
-# =========================================================
-files_in_folder = list_children(LINE_ID)
+files_in_folder = children(LINE_ID)
 
 datasets = {
     "Cap": "Cap-Measurements&Specs.xlsx",
@@ -228,11 +195,14 @@ colors = st.sidebar.multiselect(
 df = df[df["RAW MATERIAL"].isin(materials) & df["COLOR"].isin(colors)]
 
 # =========================================================
-# STATS
+# LIMITS
 # =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
+# =========================================================
+# STATS
+# =========================================================
 g = df.groupby("Characteristic")
 
 stats = pd.DataFrame({
@@ -295,7 +265,7 @@ st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================================================
-# PLOTS
+# CHARTS
 # =========================================================
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
