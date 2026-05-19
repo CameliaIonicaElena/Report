@@ -331,7 +331,7 @@ with col2:
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="pink")
 
     ax.set_title(f"Distribution - {char}")
     ax.grid()
