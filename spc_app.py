@@ -34,7 +34,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# AUTH GRAPH
+# AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -55,6 +55,21 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
+# STYLED HEADERS
+# =========================================================
+def blue_title(text, size=28):
+    st.markdown(
+        f"<h1 style='color:#A7C7E7; font-size:{size}px; font-weight:700;'>{text}</h1>",
+        unsafe_allow_html=True
+    )
+
+def section_title(text):
+    st.markdown(
+        f"<h2 style='color:#A7C7E7; font-weight:600;'>{text}</h2>",
+        unsafe_allow_html=True
+    )
+
+# =========================================================
 # SITES
 # =========================================================
 sites = {
@@ -67,7 +82,7 @@ site_name = st.sidebar.selectbox("Site", list(sites.keys()))
 site_path = sites[site_name]
 
 # =========================================================
-# SITE ID (FIXED - NO INVALID HOSTNAME)
+# SITE ID
 # =========================================================
 def get_site_id():
     url = f"https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:{site_path}"
@@ -82,7 +97,7 @@ def get_site_id():
 SITE_ID = get_site_id()
 
 # =========================================================
-# DRIVE (DOCUMENT LIBRARY FIX)
+# DRIVE
 # =========================================================
 def get_drive():
     url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive"
@@ -98,15 +113,14 @@ drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE PATH LISTING (NO SEARCH EVER)
+# SAFE PATH
 # =========================================================
 def list_folder(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
     r = requests.get(url, headers=headers)
 
     if r.status_code != 200:
-        st.error(f"❌ Folder NOT FOUND: {path}")
-        st.error(r.text)
+        st.error(f"Folder not found: {path}")
         st.stop()
 
     return r.json().get("value", [])
@@ -121,7 +135,7 @@ year_items = list_folder(BASE)
 year_folder = next((x for x in year_items if x["name"] == YEAR), None)
 
 if not year_folder:
-    st.error("❌ 2026 folder not found")
+    st.error("2026 not found")
     st.stop()
 
 # =========================================================
@@ -253,7 +267,7 @@ def capability(cpk):
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# STYLE TABLE (ONLY OOS RED + BOLD)
+# STYLE TABLE
 # =========================================================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -268,31 +282,50 @@ def style(df):
 
     return s
 
-st.subheader("SPC Summary")
+# =========================================================
+# UI HEADER
+# =========================================================
+section_title("SPC Summary")
+
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================================================
-# CHART (CLEAN + LEGEND + USL/LSL/MEAN)
+# MEASUREMENT POINT TITLE
 # =========================================================
-char = st.selectbox("Characteristic", stats["Characteristic"])
+st.markdown(
+    "<h2 style='color:#A7C7E7; font-size:26px;'>Please select one Measurement Point</h2>",
+    unsafe_allow_html=True
+)
+
+char = st.selectbox("", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
 spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
+# =========================================================
+# CHARTS
+# =========================================================
 col1, col2 = st.columns(2)
 
 with col1:
+    st.markdown("### Trend Chart")
+
     fig, ax = plt.subplots()
     ax.plot(values.values, label="Values", color="blue")
     ax.axhline(spec["Mean"], label="Mean", color="purple")
     ax.axhline(spec["USL"], linestyle="--", label="USL", color="red")
     ax.axhline(spec["LSL"], linestyle="--", label="LSL", color="red")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
+
     ax.grid()
+    ax.set_title(f"Trend - {char}")
+
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2)
     st.pyplot(fig)
 
 with col2:
+    st.markdown("### Distribution")
+
     fig, ax = plt.subplots()
     ax.hist(values, bins=20, density=True, alpha=0.6)
 
@@ -300,6 +333,8 @@ with col2:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
 
+    ax.set_title(f"Distribution - {char}")
     ax.grid()
     ax.legend(["Distribution"])
+
     st.pyplot(fig)
