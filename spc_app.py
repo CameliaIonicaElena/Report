@@ -16,7 +16,7 @@ st.title("SPC Dashboard")
 # =========================================================
 # ACCESS PASSWORD GATE
 # =========================================================
-PASSWORD = "ShowRepoGQM31" 
+PASSWORD = "ShowRepoGQM31"
 
 if "auth" not in st.session_state:
     st.session_state.auth = False
@@ -25,7 +25,7 @@ if not st.session_state.auth:
 
     st.subheader("Confidential Data - Access Required")
 
-    pwd = st.text_input("Enter password - Ask any GQM team memnber for extra info", type="password")
+    pwd = st.text_input("Enter password - Ask any GQM team member for extra info", type="password")
 
     if st.button("Login"):
 
@@ -33,7 +33,6 @@ if not st.session_state.auth:
             st.session_state.auth = True
             st.success("Access granted")
             st.rerun()
-
         else:
             st.error("Wrong password")
             st.stop()
@@ -41,7 +40,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# AUTH
+# AUTH GRAPH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -60,7 +59,6 @@ token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
     st.error("Authentication failed")
-    st.write(token)
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
@@ -71,11 +69,11 @@ headers = {"Authorization": f"Bearer {token['access_token']}"}
 sites = {
     "ALPLA HEFEI": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
-        "folder": "Measurements-test files"
+        "folder": None
     },
     "ALPLA BRAZIL": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
-        "folder": "Measurements-test files"
+        "folder": None
     },
     "ALPLA WAIDHOFEN": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
@@ -83,13 +81,11 @@ sites = {
     }
 }
 
-selected_site = st.sidebar.selectbox(
-    "Select SharePoint Site",
-    list(sites.keys())
-)
-
+# =========================================================
+# SIDEBAR - SITE
+# =========================================================
+selected_site = st.sidebar.selectbox("Select Site", list(sites.keys()))
 SITE_ID = sites[selected_site]["site_id"]
-FOLDER_NAME = sites[selected_site]["folder"]
 
 # =========================================================
 # GET DRIVE
@@ -116,78 +112,56 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER
+# LIST YEAR FOLDER CONTENT
 # =========================================================
 @st.cache_data
-def find_folder(drive_id, folder_name):
-
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{folder_name}')"
+def list_folder_children(drive_id, path):
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Folder search failed")
-        st.stop()
-
-    items = res.json().get("value", [])
-
-    for i in items:
-        if "folder" in i and i["name"] == folder_name:
-            return i["id"]
-
-    st.error("Folder not found")
-    st.stop()
-
-# =========================================================
-# LIST FILES
-# =========================================================
-@st.cache_data
-def list_files(drive_id, folder_name):
-
-    folder_id = find_folder(drive_id, folder_name)
-
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
-    res = requests.get(url, headers=headers)
-
-    if res.status_code != 200:
-        st.error("Cannot read folder content")
+        st.error("Cannot load folder")
         st.stop()
 
     return res.json().get("value", [])
 
-files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
+# =========================================================
+# SITE LOGIC
+# =========================================================
+if sites[selected_site]["folder"]:
+
+    # WAIDHOFEN STRUCTURE
+    YEAR_FOLDER = sites[selected_site]["folder"]
+
+    # GET LINES
+    lines = list_folder_children(DRIVE_ID, YEAR_FOLDER)
+    line_folders = [x for x in lines if "folder" in x]
+
+    selected_line = st.sidebar.selectbox(
+        "Select Line",
+        [f["name"] for f in line_folders]
+    )
+
+    line_id = next(f["id"] for f in line_folders if f["name"] == selected_line)
+
+    # GET FILES IN LINE
+    files = list_folder_children(DRIVE_ID, f"{YEAR_FOLDER}/{selected_line}")
+
+else:
+    # SIMPLE STRUCTURE (HEFEI / BRAZIL)
+    files = list_folder_children(DRIVE_ID, "Measurements-test files")
 
 # =========================================================
-# FILES
+# FILE SELECT
 # =========================================================
-files = {
-    "Dataset 0": "Test-Measurements&Specs.xlsx",
-    "Dataset 1": "Test-Measurements&Specs1.xlsx",
-    "Dataset 2": "Test-Measurements&Specs2.xlsx"
-}
+file_names = [f["name"] for f in files if "file" in f]
 
-selected_dataset = st.sidebar.selectbox(
-    "Select Dataset",
-    list(files.keys())
-)
+selected_file = st.sidebar.selectbox("Select Dataset", file_names)
 
-selected_file = files[selected_dataset]
+file_id = next(f["id"] for f in files if f["name"] == selected_file)
 
 # =========================================================
-# GET FILE
-# =========================================================
-def get_file_id(file_name):
-
-    for f in files_in_folder:
-        if f["name"] == file_name:
-            return f["id"]
-
-    st.error("File not found")
-    st.stop()
-
-file_id = get_file_id(selected_file)
-
-# =========================================================
-# DOWNLOAD
+# DOWNLOAD FILE
 # =========================================================
 def download_file(file_id):
 
@@ -214,9 +188,6 @@ df_specs.columns = df_specs.columns.str.strip()
 
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
-# =========================================================
-# TRANSFORM
-# =========================================================
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
@@ -252,7 +223,7 @@ df = df[
 ]
 
 # =========================================================
-# LIMITS
+# SPECS
 # =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
@@ -307,17 +278,15 @@ def capability(cpk):
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# STYLE TABLE (ONLY CHANGES HERE)
+# STYLE
 # =========================================================
 def style(df):
 
     s = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    # OOS RED + BOLD
     s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
     s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
 
-    # CAPABILITY COLORS
     s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
     s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
     s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
@@ -341,37 +310,29 @@ values = data["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
-# ================= CONTROL CHART =================
 with col1:
     fig, ax = plt.subplots()
 
-    ax.plot(values.values, color="#8e44ad", linewidth=1.8, label="Values")
-    ax.axhline(spec["Mean"], color="#27ae60", label="Mean")
-    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--", label="USL")
-    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--", label="LSL")
+    ax.plot(values.values, color="#8e44ad", linewidth=1.8)
+    ax.axhline(spec["Mean"], color="#27ae60")
+    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--")
+    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--")
 
     ax.set_title("Control Chart")
     ax.grid(alpha=0.3)
-    ax.legend()
 
     st.pyplot(fig)
 
-    st.caption(f"Mean={spec['Mean']:.3f} | USL={spec['USL']:.3f} | LSL={spec['LSL']:.3f}")
-
-# ================= HISTOGRAM =================
 with col2:
     fig, ax = plt.subplots()
 
-    ax.hist(values, bins=20, density=True, alpha=0.65, color="#3498db", edgecolor="black")
+    ax.hist(values, bins=20, density=True, alpha=0.65, edgecolor="black")
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="#8e44ad", label="Normal Fit")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
     ax.set_title("Histogram")
     ax.grid(alpha=0.3)
-    ax.legend()
 
     st.pyplot(fig)
-
-    st.caption(f"Std={values.std():.3f} | N={len(values)}")
