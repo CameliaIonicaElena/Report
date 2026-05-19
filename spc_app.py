@@ -16,7 +16,7 @@ st.title("SPC Dashboard")
 # =========================================================
 # ACCESS PASSWORD GATE
 # =========================================================
-PASSWORD = "ShowRepoGQM31" 
+PASSWORD = "ShowRepoGQM31"
 
 if "auth" not in st.session_state:
     st.session_state.auth = False
@@ -25,7 +25,7 @@ if not st.session_state.auth:
 
     st.subheader("Confidential Data - Access Required")
 
-    pwd = st.text_input("Enter password - Ask any GQM team memnber for extra info", type="password")
+    pwd = st.text_input("Enter password - Ask any GQM team member for extra info", type="password")
 
     if st.button("Login"):
 
@@ -33,7 +33,6 @@ if not st.session_state.auth:
             st.session_state.auth = True
             st.success("Access granted")
             st.rerun()
-
         else:
             st.error("Wrong password")
             st.stop()
@@ -70,16 +69,13 @@ headers = {"Authorization": f"Bearer {token['access_token']}"}
 # =========================================================
 sites = {
     "ALPLA HEFEI": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
-        "folder": "Quality Files Exchange"
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:"
     },
     "ALPLA BRAZIL": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
-        "folder": "Measurements-test files"
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:"
     },
     "ALPLA WAIDHOFEN": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
-        "folder": "Quality Files Exchange"
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:"
     }
 }
 
@@ -89,14 +85,12 @@ selected_site = st.sidebar.selectbox(
 )
 
 SITE_ID = sites[selected_site]["site_id"]
-FOLDER_NAME = sites[selected_site]["folder"]
 
 # =========================================================
-# GET DRIVE
+# DRIVE
 # =========================================================
 @st.cache_data
 def get_drive(site_id):
-
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
     res = requests.get(url, headers=headers)
 
@@ -116,48 +110,19 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# FIND FOLDER (for simple sites)
+# GENERIC GRAPH GET CHILDREN
 # =========================================================
-@st.cache_data
-def find_folder(drive_id, folder_name):
-
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{folder_name}')"
+def get_children(item_id):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{item_id}/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Folder search failed")
-        st.stop()
-
-    items = res.json().get("value", [])
-
-    for i in items:
-        if "folder" in i and i["name"] == folder_name:
-            return i["id"]
-
-    st.error("Folder not found")
-    st.stop()
-
-# =========================================================
-# DEFAULT FILE LIST (HEFEI + BRAZIL)
-# =========================================================
-def list_files_simple(drive_id, folder_name):
-    folder_id = find_folder(drive_id, folder_name)
-
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}/children"
-    res = requests.get(url, headers=headers)
-
-    if res.status_code != 200:
-        st.error("Cannot read folder content")
+        st.error("Cannot load folder structure")
         st.stop()
 
     return res.json().get("value", [])
 
-# =========================================================
-# WAIDHOFEN STRUCTURE (FULL FIX)
-# =========================================================
-if selected_site == "ALPLA WAIDHOFEN":
-
-    # 1. ROOT → Quality Files Exchange
+def get_root_children():
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
     res = requests.get(url, headers=headers)
 
@@ -165,61 +130,54 @@ if selected_site == "ALPLA WAIDHOFEN":
         st.error("Cannot load root")
         st.stop()
 
-    root_items = res.json().get("value", [])
+    return res.json().get("value", [])
 
-    qfe = next(f for f in root_items if f["name"] == "Quality Files Exchange")
-    qfe_id = qfe["id"]
+# =========================================================
+# COMMON STRUCTURE NAVIGATION (WORKS FOR ALL SITES)
+# =========================================================
+root_items = [x for x in get_root_children() if "folder" in x]
 
-    # 2. INSIDE → 2026 (AUTO)
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{qfe_id}/children"
-    res = requests.get(url, headers=headers)
+selected_root = st.sidebar.selectbox(
+    "Folder",
+    [f["name"] for f in root_items]
+)
 
-    if res.status_code != 200:
-        st.error("Cannot load QFE")
-        st.stop()
+root_id = next(f["id"] for f in root_items if f["name"] == selected_root)
 
-    qfe_children = res.json().get("value", [])
+# auto go into 2026 if exists, otherwise use selected root
+level1_items = get_children(root_id)
+level1_folders = [x for x in level1_items if "folder" in x]
 
-    year_2026 = next(f for f in qfe_children if f["name"] == "2026")
-    year_id = year_2026["id"]
+# try auto-detect "2026"
+year_folder = next(
+    (f for f in level1_folders if f["name"] == "2026"),
+    None
+)
 
-    # 3. LINES
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{year_id}/children"
-    res = requests.get(url, headers=headers)
-
-    if res.status_code != 200:
-        st.error("Cannot load 2026")
-        st.stop()
-
-    lines = [x for x in res.json().get("value", []) if "folder" in x]
-
-    selected_line = st.sidebar.selectbox(
-        "Select Line",
-        [l["name"] for l in lines]
-    )
-
-    line_id = next(l["id"] for l in lines if l["name"] == selected_line)
-
-    # 4. FILES
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{line_id}/children"
-    res = requests.get(url, headers=headers)
-
-    if res.status_code != 200:
-        st.error("Cannot load files")
-        st.stop()
-
-    files_in_folder = res.json().get("value", [])
-
+if year_folder:
+    year_id = year_folder["id"]
+    line_level_items = get_children(year_id)
 else:
-    files_in_folder = list_files_simple(DRIVE_ID, FOLDER_NAME)
+    line_level_items = level1_folders
+
+line_folders = [x for x in line_level_items if "folder" in x]
+
+selected_line = st.sidebar.selectbox(
+    "Select Line",
+    [l["name"] for l in line_folders]
+)
+
+line_id = next(l["id"] for l in line_folders if l["name"] == selected_line)
 
 # =========================================================
-# FILE SELECTION
+# FILES
 # =========================================================
+files_in_folder = get_children(line_id)
+
 files = {
-    "Cap": "Cap-Measurements&Specs.xlsx",
-    "Flange": "Flange-Measurements&Specs.xlsx",
-    "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
+    "Dataset 0": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx"
 }
 
 selected_dataset = st.sidebar.selectbox(
@@ -229,11 +187,7 @@ selected_dataset = st.sidebar.selectbox(
 
 selected_file = files[selected_dataset]
 
-# =========================================================
-# GET FILE
-# =========================================================
 def get_file_id(file_name):
-
     for f in files_in_folder:
         if f["name"] == file_name:
             return f["id"]
@@ -247,7 +201,6 @@ file_id = get_file_id(selected_file)
 # DOWNLOAD
 # =========================================================
 def download_file(file_id):
-
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
     res = requests.get(url, headers=headers)
 
@@ -361,7 +314,6 @@ stats["Process Capability"] = stats["Cpk"].apply(capability)
 # STYLE TABLE
 # =========================================================
 def style(df):
-
     s = pd.DataFrame("", index=df.index, columns=df.columns)
 
     s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
@@ -392,29 +344,16 @@ col1, col2 = st.columns(2)
 
 with col1:
     fig, ax = plt.subplots()
-
-    ax.plot(values.values, color="#8e44ad", linewidth=1.8, label="Values")
-    ax.axhline(spec["Mean"], color="#27ae60", label="Mean")
-    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--", label="USL")
-    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--", label="LSL")
-
-    ax.set_title("Control Chart")
-    ax.grid(alpha=0.3)
-    ax.legend()
-
+    ax.plot(values.values, color="#8e44ad", linewidth=1.8)
+    ax.axhline(spec["Mean"], color="#27ae60")
+    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--")
+    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--")
     st.pyplot(fig)
 
 with col2:
     fig, ax = plt.subplots()
-
-    ax.hist(values, bins=20, density=True, alpha=0.65, color="#3498db", edgecolor="black")
-
+    ax.hist(values, bins=20, density=True, alpha=0.65)
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="#8e44ad", label="Normal Fit")
-
-    ax.set_title("Histogram")
-    ax.grid(alpha=0.3)
-    ax.legend()
-
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
     st.pyplot(fig)
