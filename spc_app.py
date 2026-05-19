@@ -79,7 +79,7 @@ sites = {
     },
     "ALPLA WAIDHOFEN": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
-        "folder": "TOD_SwiftCap_Linked_4304"
+        "folder": "2026"
     }
 }
 
