@@ -80,7 +80,7 @@ sites = {
      "ALPLA Waidhofen": {
         "site_id": "https://sigitglobal.sharepoint.com/sites/GLB-Quality-Alpla_Waidhofen:",
         "folder": "Measurements-test files"
-    },
+    }
 }
 
 selected_site = st.sidebar.selectbox(
