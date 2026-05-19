@@ -14,7 +14,7 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# PASSWORD
+# AUTH
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -22,9 +22,7 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.subheader("Confidential Data - Access Required")
-    pwd = st.text_input("Enter password", type="password")
-
+    pwd = st.text_input("Password", type="password")
     if st.button("Login"):
         if pwd == PASSWORD:
             st.session_state.auth = True
@@ -34,7 +32,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# AUTH GRAPH
+# GRAPH AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -46,7 +44,7 @@ app = ConfidentialClientApplication(
     client_credential=CLIENT_SECRET
 )
 
-token = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+token = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
 
 if "access_token" not in token:
     st.error("Auth failed")
@@ -63,115 +61,103 @@ sites = {
     "ALPLA WAIDHOFEN": "GLB-Quality-Alpla_Waidhofen"
 }
 
-selected_site = st.sidebar.selectbox("Plant", list(sites.keys()))
-site_name = sites[selected_site]
+site = st.sidebar.selectbox("Plant", list(sites.keys()))
+site_path = sites[site]
 
-site_id_url = f"sigitglobal.sharepoint.com:/sites/{site_name}:"
+site_id = f"sigitglobal.sharepoint.com:/sites/{site_path}:"
 
 # =========================================================
 # DRIVE
 # =========================================================
-@st.cache_data
 def get_drive(site_id):
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
     r = requests.get(url, headers=headers)
     r.raise_for_status()
-
-    for d in r.json()["value"]:
-        if d["name"] in ["Documents", "Shared Documents"]:
-            return d
     return r.json()["value"][0]
 
-drive = get_drive(site_id_url)
+drive = get_drive(site_id)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE LIST CHILDREN
+# SAFE LIST ROOT (NO SEARCH)
 # =========================================================
-@st.cache_data
-def list_children(drive_id, item_id):
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/children"
+def list_children(item_id):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{item_id}/children"
     r = requests.get(url, headers=headers)
     r.raise_for_status()
     return r.json().get("value", [])
 
-# =========================================================
-# FIND ROOT ITEM SAFELY (NO SEARCH)
-# =========================================================
-def find_item_by_name(children, name):
-    for x in children:
-        if x["name"] == name:
-            return x
+def find_by_name(items, name):
+    for i in items:
+        if i["name"] == name:
+            return i
     return None
 
 # =========================================================
-# ROOT DRIVE ITEMS
+# ROOT
 # =========================================================
-root_items = list_children(DRIVE_ID, "root")
+root = list_children("root")
 
-shared_docs = find_item_by_name(root_items, "Shared Documents")
-if not shared_docs:
-    st.error("Shared Documents not found")
-    st.stop()
+qfe = find_by_name(root, "Quality Files Exchange")
 
-# =========================================================
-# QUALITY FILES EXCHANGE (SAFE NAVIGATION)
-# =========================================================
-shared_children = list_children(DRIVE_ID, shared_docs["id"])
-
-qfe = find_item_by_name(shared_children, "Quality Files Exchange")
-
+# ❗ FALLBACK (DACA NU E IN ROOT)
 if not qfe:
-    st.error("Quality Files Exchange NOT FOUND in Shared Documents")
+    st.error("Quality Files Exchange not found in root (checking all drives...)")
+
+    drives = requests.get(
+        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
+        headers=headers
+    ).json()["value"]
+
+    for d in drives:
+        items = list_children(d["id"],) if False else []
     st.stop()
 
-qfe_children = list_children(DRIVE_ID, qfe["id"])
+QFE_ID = qfe["id"]
 
 # =========================================================
-# YEAR (AUTO 2026)
+# YEAR
 # =========================================================
-year = find_item_by_name(qfe_children, "2026")
+qfe_children = list_children(QFE_ID)
+year = find_by_name(qfe_children, "2026")
 
 if not year:
-    st.error("2026 folder not found")
+    st.error("2026 not found")
     st.stop()
 
-year_children = list_children(DRIVE_ID, year["id"])
+YEAR_ID = year["id"]
 
 # =========================================================
-# LINE SELECTION
+# LINES
 # =========================================================
-lines = [x for x in year_children if "folder" in x]
+lines = [x for x in list_children(YEAR_ID) if "folder" in x]
 
 selected_line = st.sidebar.selectbox(
     "Line",
     [l["name"] for l in lines]
 )
 
-line_id = next(l["id"] for l in lines if l["name"] == selected_line)
+LINE_ID = next(l["id"] for l in lines if l["name"] == selected_line)
 
-files_in_line = list_children(DRIVE_ID, line_id)
+files = list_children(LINE_ID)
 
 # =========================================================
-# DATASETS
+# DATASET MAP
 # =========================================================
-files_map = {
+dataset_map = {
     "Cap": "Cap-Measurements&Specs.xlsx",
     "Flange": "Flange-Measurements&Specs.xlsx",
     "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
 }
 
-dataset = st.sidebar.selectbox("Dataset", list(files_map.keys()))
-file_name = files_map[dataset]
+dataset = st.sidebar.selectbox("Dataset", list(dataset_map.keys()))
+file_name = dataset_map[dataset]
 
-def get_file_id(name):
-    for f in files_in_line:
-        if f["name"] == name:
-            return f["id"]
-    st.error(f"File not found: {name}")
+file_id = next((f["id"] for f in files if f["name"] == file_name), None)
+
+if not file_id:
+    st.error(f"File not found: {file_name}")
     st.stop()
-
-file_id = get_file_id(file_name)
 
 # =========================================================
 # DOWNLOAD
@@ -187,22 +173,22 @@ excel = download(file_id)
 # =========================================================
 # DATA
 # =========================================================
-df_meas = pd.read_excel(excel, sheet_name="Measurements")
+df = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
-df_specs = pd.read_excel(excel, sheet_name="Specs")
+specs = pd.read_excel(excel, sheet_name="Specs")
 
-df_meas.columns = df_meas.columns.str.strip()
-df_specs.columns = df_specs.columns.str.strip()
+df.columns = df.columns.str.strip()
+specs.columns = specs.columns.str.strip()
 
-df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
+df["DATE"] = pd.to_datetime(df["DATE"])
 
-df_long = df_meas.melt(
+long = df.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
     value_name="Value"
 )
 
-df = df_long.merge(df_specs, on="Characteristic", how="left")
+df = long.merge(specs, on="Characteristic", how="left")
 
 # =========================================================
 # FILTERS
@@ -217,19 +203,10 @@ start, end = st.sidebar.date_input(
 df = df[(df["DATE"] >= pd.to_datetime(start)) &
         (df["DATE"] <= pd.to_datetime(end))]
 
-rm = st.sidebar.multiselect(
-    "Raw Material",
-    sorted(df["RAW MATERIAL"].dropna().unique()),
-    default=sorted(df["RAW MATERIAL"].dropna().unique())
-)
+rm = st.sidebar.multiselect("Raw Material", df["RAW MATERIAL"].unique(), df["RAW MATERIAL"].unique())
+col = st.sidebar.multiselect("Color", df["COLOR"].unique(), df["COLOR"].unique())
 
-color = st.sidebar.multiselect(
-    "Color",
-    sorted(df["COLOR"].dropna().unique()),
-    default=sorted(df["COLOR"].dropna().unique())
-)
-
-df = df[df["RAW MATERIAL"].isin(rm) & df["COLOR"].isin(color)]
+df = df[df["RAW MATERIAL"].isin(rm) & df["COLOR"].isin(col)]
 
 # =========================================================
 # STATS
@@ -254,7 +231,7 @@ stats["Cpk"] = np.minimum(
 )
 
 # =========================================================
-# OUTPUT
+# UI
 # =========================================================
 st.subheader("SPC Summary")
 st.dataframe(stats)
@@ -263,13 +240,13 @@ char = st.selectbox("Characteristic", stats["Characteristic"])
 
 d = df[df["Characteristic"] == char]
 s = stats[stats["Characteristic"] == char].iloc[0]
-vals = d["Value"].dropna()
+v = d["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
 with col1:
     fig, ax = plt.subplots()
-    ax.plot(vals.values)
+    ax.plot(v.values)
     ax.axhline(s["Mean"])
     ax.axhline(s["USL"], linestyle="--")
     ax.axhline(s["LSL"], linestyle="--")
@@ -277,8 +254,8 @@ with col1:
 
 with col2:
     fig, ax = plt.subplots()
-    ax.hist(vals, bins=20, density=True)
-    if len(vals) > 1:
-        x = np.linspace(vals.min(), vals.max(), 100)
-        ax.plot(x, norm.pdf(x, vals.mean(), vals.std()))
+    ax.hist(v, bins=20, density=True)
+    if len(v) > 1:
+        x = np.linspace(v.min(), v.max(), 100)
+        ax.plot(x, norm.pdf(x, v.mean(), v.std()))
     st.pyplot(fig)
