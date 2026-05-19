@@ -76,6 +76,10 @@ sites = {
     "ALPLA BRAZIL": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
         "folder": "Measurements-test files"
+    },
+    "ALPLA WAIDHOFEN": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
+        "folder": "Measurements-test files"
     }
 }
 
