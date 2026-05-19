@@ -14,7 +14,7 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# ACCESS PASSWORD GATE
+# LOGIN
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -25,10 +25,9 @@ if not st.session_state.auth:
 
     st.subheader("Confidential Data - Access Required")
 
-    pwd = st.text_input("Enter password - Ask any GQM team member for extra info", type="password")
+    pwd = st.text_input("Enter password", type="password")
 
     if st.button("Login"):
-
         if pwd == PASSWORD:
             st.session_state.auth = True
             st.success("Access granted")
@@ -40,7 +39,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# AUTH GRAPH
+# GRAPH AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -64,35 +63,22 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# SHAREPOINT SITES
+# SITES
 # =========================================================
 sites = {
-    "ALPLA HEFEI": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
-        "folder": None
-    },
-    "ALPLA BRAZIL": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
-        "folder": None
-    },
-    "ALPLA WAIDHOFEN": {
-        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
-        "folder": "2026"
-    }
+    "ALPLA HEFEI": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
+    "ALPLA BRAZIL": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
+    "ALPLA WAIDHOFEN": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:"
 }
 
-# =========================================================
-# SIDEBAR - SITE
-# =========================================================
 selected_site = st.sidebar.selectbox("Select Site", list(sites.keys()))
-SITE_ID = sites[selected_site]["site_id"]
+SITE_ID = sites[selected_site]
 
 # =========================================================
-# GET DRIVE
+# DRIVE
 # =========================================================
 @st.cache_data
 def get_drive(site_id):
-
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
     res = requests.get(url, headers=headers)
 
@@ -112,49 +98,49 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# LIST YEAR FOLDER CONTENT
+# LIST CHILDREN (GENERIC)
 # =========================================================
 @st.cache_data
-def list_folder_children(drive_id, path):
+def list_children_by_path(drive_id, path):
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error("Cannot load folder")
+        st.error(f"Cannot load: {path}")
         st.stop()
 
     return res.json().get("value", [])
 
 # =========================================================
-# SITE LOGIC
+# YEAR LEVEL (AUTO DETECT)
 # =========================================================
-if sites[selected_site]["folder"]:
+year_items = list_children_by_path(DRIVE_ID, "")
 
-    # WAIDHOFEN STRUCTURE
-    YEAR_FOLDER = sites[selected_site]["folder"]
+year_folders = [x for x in year_items if "folder" in x]
 
-    # GET LINES
-    lines = list_folder_children(DRIVE_ID, YEAR_FOLDER)
-    line_folders = [x for x in lines if "folder" in x]
+year_names = [y["name"] for y in year_folders]
 
-    selected_line = st.sidebar.selectbox(
-        "Select Line",
-        [f["name"] for f in line_folders]
-    )
-
-    line_id = next(f["id"] for f in line_folders if f["name"] == selected_line)
-
-    # GET FILES IN LINE
-    files = list_folder_children(DRIVE_ID, f"{YEAR_FOLDER}/{selected_line}")
-
-else:
-    # SIMPLE STRUCTURE (HEFEI / BRAZIL)
-    files = list_folder_children(DRIVE_ID, "Measurements-test files")
+selected_year = st.sidebar.selectbox("Select Year", year_names)
 
 # =========================================================
-# FILE SELECT
+# LINE LEVEL
 # =========================================================
-file_names = [f["name"] for f in files if "file" in f]
+line_items = list_children_by_path(DRIVE_ID, selected_year)
+
+line_folders = [x for x in line_items if "folder" in x]
+
+line_names = [l["name"] for l in line_folders]
+
+selected_line = st.sidebar.selectbox("Select Line", line_names)
+
+# =========================================================
+# FILE LEVEL
+# =========================================================
+file_items = list_children_by_path(DRIVE_ID, f"{selected_year}/{selected_line}")
+
+files = [x for x in file_items if "file" in x]
+
+file_names = [f["name"] for f in files]
 
 selected_file = st.sidebar.selectbox("Select Dataset", file_names)
 
@@ -164,7 +150,6 @@ file_id = next(f["id"] for f in files if f["name"] == selected_file)
 # DOWNLOAD FILE
 # =========================================================
 def download_file(file_id):
-
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
     res = requests.get(url, headers=headers)
 
@@ -177,7 +162,7 @@ def download_file(file_id):
 excel = download_file(file_id)
 
 # =========================================================
-# LOAD DATA
+# LOAD DATA (UNCHANGED)
 # =========================================================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
@@ -278,27 +263,10 @@ def capability(cpk):
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
 # =========================================================
-# STYLE
-# =========================================================
-def style(df):
-
-    s = pd.DataFrame("", index=df.index, columns=df.columns)
-
-    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
-    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
-
-    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
-    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
-    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
-    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
-
-    return s
-
-# =========================================================
 # OUTPUT
 # =========================================================
 st.subheader("SPC Summary")
-st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+st.dataframe(stats, use_container_width=True)
 
 st.markdown("## Measurement Point")
 
@@ -313,26 +281,22 @@ col1, col2 = st.columns(2)
 with col1:
     fig, ax = plt.subplots()
 
-    ax.plot(values.values, color="#8e44ad", linewidth=1.8)
-    ax.axhline(spec["Mean"], color="#27ae60")
-    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--")
-    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--")
+    ax.plot(values.values)
+    ax.axhline(spec["Mean"])
+    ax.axhline(spec["USL"], linestyle="--")
+    ax.axhline(spec["LSL"], linestyle="--")
 
     ax.set_title("Control Chart")
-    ax.grid(alpha=0.3)
-
     st.pyplot(fig)
 
 with col2:
     fig, ax = plt.subplots()
 
-    ax.hist(values, bins=20, density=True, alpha=0.65, edgecolor="black")
+    ax.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
         ax.plot(x, norm.pdf(x, values.mean(), values.std()))
 
     ax.set_title("Histogram")
-    ax.grid(alpha=0.3)
-
     st.pyplot(fig)
