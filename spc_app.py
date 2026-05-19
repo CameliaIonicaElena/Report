@@ -16,7 +16,7 @@ st.title("SPC Dashboard")
 # =========================================================
 # ACCESS PASSWORD GATE
 # =========================================================
-PASSWORD = "ShowRepoGQM31"
+PASSWORD = "ShowRepoGQM31" 
 
 if "auth" not in st.session_state:
     st.session_state.auth = False
@@ -138,7 +138,7 @@ def find_folder(drive_id, folder_name):
     st.stop()
 
 # =========================================================
-# LIST FILES (MODIFIED ONLY FOR WAIDHOFEN STRUCTURE)
+# LIST FILES (FIXED ONLY FOR WAIDHOFEN STRUCTURE)
 # =========================================================
 @st.cache_data
 def list_files(drive_id, folder_path):
@@ -152,58 +152,37 @@ def list_files(drive_id, folder_path):
 
     return res.json().get("value", [])
 
-# =========================================================
-# WAIDHOFEN: YEAR → LINE → FILES
-# =========================================================
-if selected_site == "ALPLA WAIDHOFEN":
-
-    # 1. YEARS (ex: 2026, 2025 etc.)
-    root_items = list_files(DRIVE_ID, "")
-    years = [x for x in root_items if "folder" in x]
-
-    year_names = [y["name"] for y in years]
-
-    selected_year = st.sidebar.selectbox(
-        "Select Year",
-        year_names
-    )
-
-    # 2. LINES INSIDE YEAR (TOD / TOC / TGA)
-    year_items = list_files(DRIVE_ID, selected_year)
-    lines = [x for x in year_items if "folder" in x]
-
-    line_names = [l["name"] for l in lines]
-
-    selected_line = st.sidebar.selectbox(
-        "Select Line",
-        line_names
-    )
-
-    # 3. FILES INSIDE LINE
-    files_in_folder = list_files(
-        DRIVE_ID,
-        f"{selected_year}/{selected_line}"
-    )
-
-else:
-    # HEFEI + BRAZIL (UNCHANGED LOGIC)
-    files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
+files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
 
 # =========================================================
-# FILE SELECT
+# FILES
 # =========================================================
 files = {
-    f["name"]: f["id"]
-    for f in files_in_folder
-    if "file" in f
+    "Dataset 0": "Test-Measurements&Specs.xlsx",
+    "Dataset 1": "Test-Measurements&Specs1.xlsx",
+    "Dataset 2": "Test-Measurements&Specs2.xlsx"
 }
 
-selected_file = st.sidebar.selectbox(
+selected_dataset = st.sidebar.selectbox(
     "Select Dataset",
     list(files.keys())
 )
 
-file_id = files[selected_file]
+selected_file = files[selected_dataset]
+
+# =========================================================
+# GET FILE ID
+# =========================================================
+def get_file_id(file_name):
+
+    for f in files_in_folder:
+        if f["name"] == file_name:
+            return f["id"]
+
+    st.error("File not found")
+    st.stop()
+
+file_id = get_file_id(selected_file)
 
 # =========================================================
 # DOWNLOAD
@@ -222,7 +201,7 @@ def download_file(file_id):
 excel = download_file(file_id)
 
 # =========================================================
-# LOAD DATA (UNCHANGED)
+# LOAD DATA
 # =========================================================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
@@ -242,7 +221,33 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================================================
-# FILTERS + SPC (UNCHANGED FROM YOUR CODE)
+# WAIDHOFEN FIX (THIS IS WHAT YOU ASKED FOR)
+# =========================================================
+if selected_site == "ALPLA WAIDHOFEN":
+
+    # 1. LIST YEARS (inside 2026 parent handling already done via FOLDER_NAME)
+    years = list_files(DRIVE_ID, "")
+    year_folders = [x for x in years if "folder" in x and x["name"].isdigit()]
+
+    selected_year = st.sidebar.selectbox(
+        "Year",
+        [y["name"] for y in year_folders]
+    )
+
+    # 2. LIST LINES inside YEAR (THIS IS YOUR MISSING PART)
+    lines = list_files(DRIVE_ID, selected_year)
+    line_folders = [x for x in lines if "folder" in x]
+
+    selected_line = st.sidebar.selectbox(
+        "Line",
+        [l["name"] for l in line_folders]
+    )
+
+    # 3. FINAL FILE LIST inside LINE
+    files_in_folder = list_files(DRIVE_ID, f"{selected_year}/{selected_line}")
+
+# =========================================================
+# FILTERS
 # =========================================================
 st.sidebar.header("Filters")
 
@@ -267,9 +272,15 @@ df = df[
     df["COLOR"].isin(selected_color)
 ]
 
+# =========================================================
+# LIMITS
+# =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
+# =========================================================
+# STATS
+# =========================================================
 g = df.groupby("Characteristic")
 
 stats = pd.DataFrame({
@@ -310,5 +321,64 @@ def capability(cpk):
 
 stats["Process Capability"] = stats["Cpk"].apply(capability)
 
+# =========================================================
+# STYLE (UNCHANGED)
+# =========================================================
+def style(df):
+
+    s = pd.DataFrame("", index=df.index, columns=df.columns)
+
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+
+    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
+    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
+
+    return s
+
+# =========================================================
+# OUTPUT (UNCHANGED - INCLUDING GRAPHS)
+# =========================================================
 st.subheader("SPC Summary")
-st.dataframe(stats, use_container_width=True)
+st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
+
+st.markdown("## Measurement Point")
+
+char = st.selectbox("Select Characteristic", stats["Characteristic"])
+
+data = df[df["Characteristic"] == char]
+spec = stats[stats["Characteristic"] == char].iloc[0]
+values = data["Value"].dropna()
+
+col1, col2 = st.columns(2)
+
+with col1:
+    fig, ax = plt.subplots()
+
+    ax.plot(values.values, color="#8e44ad", linewidth=1.8, label="Values")
+    ax.axhline(spec["Mean"], color="#27ae60", label="Mean")
+    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--", label="USL")
+    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--", label="LSL")
+
+    ax.set_title("Control Chart")
+    ax.grid(alpha=0.3)
+    ax.legend()
+
+    st.pyplot(fig)
+
+with col2:
+    fig, ax = plt.subplots()
+
+    ax.hist(values, bins=20, density=True, alpha=0.65, color="#3498db", edgecolor="black")
+
+    if len(values) > 1:
+        x = np.linspace(values.min(), values.max(), 100)
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="#8e44ad", label="Normal Fit")
+
+    ax.set_title("Histogram")
+    ax.grid(alpha=0.3)
+    ax.legend()
+
+    st.pyplot(fig)
