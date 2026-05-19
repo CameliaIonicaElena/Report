@@ -34,7 +34,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# GRAPH AUTH
+# AUTH GRAPH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -67,7 +67,7 @@ site_name = st.sidebar.selectbox("Site", list(sites.keys()))
 site_path = sites[site_name]
 
 # =========================================================
-# SITE ID (FIXED)
+# SITE ID (FIXED - NO INVALID HOSTNAME)
 # =========================================================
 def get_site_id():
     url = f"https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:{site_path}"
@@ -82,7 +82,7 @@ def get_site_id():
 SITE_ID = get_site_id()
 
 # =========================================================
-# DRIVE
+# DRIVE (DOCUMENT LIBRARY FIX)
 # =========================================================
 def get_drive():
     url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive"
@@ -98,17 +98,18 @@ drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE PATH (IMPORTANT FIX - NO SEARCH EVER)
+# SAFE PATH LISTING (NO SEARCH EVER)
 # =========================================================
 def list_folder(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
     r = requests.get(url, headers=headers)
 
     if r.status_code != 200:
-        st.error(f"Folder not found: {path}")
+        st.error(f"❌ Folder NOT FOUND: {path}")
+        st.error(r.text)
         st.stop()
 
-    return r.json()["value"]
+    return r.json().get("value", [])
 
 BASE = "Quality Files Exchange"
 YEAR = "2026"
@@ -116,11 +117,11 @@ YEAR = "2026"
 # =========================================================
 # YEAR
 # =========================================================
-year_folder = list_folder(BASE)
-year_folder = next((x for x in year_folder if x["name"] == YEAR), None)
+year_items = list_folder(BASE)
+year_folder = next((x for x in year_items if x["name"] == YEAR), None)
 
 if not year_folder:
-    st.error("2026 not found")
+    st.error("❌ 2026 folder not found")
     st.stop()
 
 # =========================================================
@@ -130,6 +131,7 @@ lines = list_folder(f"{BASE}/{YEAR}")
 lines = [x for x in lines if "folder" in x]
 
 selected_line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
+LINE = next(l["name"] for l in lines if l["name"] == selected_line)
 
 # =========================================================
 # FILES
@@ -140,15 +142,12 @@ files = {
     "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
 }
 
-selected_dataset = st.sidebar.selectbox("Dataset", list(files.keys()))
-file_name = files[selected_dataset]
+dataset = st.sidebar.selectbox("Dataset", list(files.keys()))
+file_name = files[dataset]
 
-file_path = f"{BASE}/{YEAR}/{selected_line}/{file_name}"
+file_path = f"{BASE}/{YEAR}/{LINE}/{file_name}"
 
-# =========================================================
-# DOWNLOAD
-# =========================================================
-def download(path):
+def download_file(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/content"
     r = requests.get(url, headers=headers)
 
@@ -158,10 +157,10 @@ def download(path):
 
     return BytesIO(r.content)
 
-excel = download(file_path)
+excel = download_file(file_path)
 
 # =========================================================
-# DATA
+# LOAD DATA
 # =========================================================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
@@ -172,6 +171,9 @@ df_specs.columns = df_specs.columns.str.strip()
 
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
+# =========================================================
+# TRANSFORM
+# =========================================================
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
@@ -190,8 +192,8 @@ start, end = st.sidebar.date_input(
 
 df = df[(df["DATE"] >= pd.to_datetime(start)) & (df["DATE"] <= pd.to_datetime(end))]
 
-materials = df["RAW MATERIAL"].dropna().unique()
-colors = df["COLOR"].dropna().unique()
+materials = sorted(df["RAW MATERIAL"].dropna().unique())
+colors = sorted(df["COLOR"].dropna().unique())
 
 df = df[
     df["RAW MATERIAL"].isin(st.sidebar.multiselect("Material", materials, default=materials)) &
@@ -226,13 +228,43 @@ stats["Cpk"] = np.minimum(
 )
 
 # =========================================================
-# TABLE STYLE (KEEP COLORS)
+# OOS
+# =========================================================
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+
+stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
+stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+
+# =========================================================
+# CAPABILITY
+# =========================================================
+def capability(cpk):
+    if pd.isna(cpk):
+        return "No data"
+    if cpk >= 1.67:
+        return "Excellent"
+    if cpk >= 1.33:
+        return "Capable"
+    if cpk >= 1:
+        return "Marginal"
+    return "Not capable"
+
+stats["Process Capability"] = stats["Cpk"].apply(capability)
+
+# =========================================================
+# STYLE TABLE (ONLY OOS RED + BOLD)
 # =========================================================
 def style(df):
     s = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    s.loc[df["Cp"] > 1.33, "Cp"] = "color:blue;font-weight:bold"
-    s.loc[df["Cpk"] < 1, "Cpk"] = "color:red;font-weight:bold"
+    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
+    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+
+    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
+    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
+    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
+    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
 
     return s
 
@@ -240,62 +272,34 @@ st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
 # =========================================================
-# CHARACTERISTIC
+# CHART (CLEAN + LEGEND + USL/LSL/MEAN)
 # =========================================================
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
 data = df[df["Characteristic"] == char]
+spec = stats[stats["Characteristic"] == char].iloc[0]
 values = data["Value"].dropna()
 
-spec = stats[stats["Characteristic"] == char].iloc[0]
-
-# =========================================================
-# PLOTS (RESTORED ORIGINAL STYLE)
-# =========================================================
 col1, col2 = st.columns(2)
 
-# ================= LEFT (LINE CHART)
 with col1:
     fig, ax = plt.subplots()
-
-    ax.plot(values.values, color="blue", label="Values")
-
-    ax.axhline(spec["Mean"], color="blue", linestyle="-", linewidth=2, label="Mean")
-    ax.axhline(spec["USL"], color="red", linestyle="--", label="USL")
-    ax.axhline(spec["LSL"], color="red", linestyle="--", label="LSL")
-
-    ax.fill_between(range(len(values)), spec["LSL"], spec["USL"], color="purple", alpha=0.08)
-
-    ax.set_title("Trend")
-    ax.grid(True)
-    ax.legend(loc="upper right")
-
+    ax.plot(values.values, label="Values", color="blue")
+    ax.axhline(spec["Mean"], label="Mean", color="purple")
+    ax.axhline(spec["USL"], linestyle="--", label="USL", color="red")
+    ax.axhline(spec["LSL"], linestyle="--", label="LSL", color="red")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
+    ax.grid()
     st.pyplot(fig)
 
-# ================= RIGHT (HISTOGRAM)
 with col2:
     fig, ax = plt.subplots()
-
-    ax.hist(values, bins=20, density=True, alpha=0.5, color="purple")
+    ax.hist(values, bins=20, density=True, alpha=0.6)
 
     if len(values) > 1:
         x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="blue", label="Normal Fit")
+        ax.plot(x, norm.pdf(x, values.mean(), values.std()), color="purple")
 
-    ax.set_title("Distribution")
-    ax.grid(True)
-    ax.legend()
-
+    ax.grid()
+    ax.legend(["Distribution"])
     st.pyplot(fig)
-
-# =========================================================
-# LEGEND UNDER (SPC INFO STYLE)
-# =========================================================
-st.markdown("### SPC Legend")
-st.markdown(
-    """
-    🔵 Blue = Process mean / values  
-    🔴 Red = Specification limits (USL / LSL)  
-    🟣 Purple area = tolerance zone  
-    """
-)
