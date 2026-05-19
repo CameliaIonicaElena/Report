@@ -8,13 +8,13 @@ import requests
 from io import BytesIO
 
 # =========================================================
-# PAGE
+# APP
 # =========================================================
 st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# PASSWORD
+# LOGIN
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -22,8 +22,7 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.subheader("Confidential Data - Access Required")
-    pwd = st.text_input("Enter password", type="password")
+    pwd = st.text_input("Password", type="password")
 
     if st.button("Login"):
         if pwd == PASSWORD:
@@ -32,11 +31,10 @@ if not st.session_state.auth:
         else:
             st.error("Wrong password")
             st.stop()
-
     st.stop()
 
 # =========================================================
-# AUTH MICROSOFT GRAPH
+# GRAPH AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -57,70 +55,85 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# SITES
+# SITES (FIXED PROPERLY)
 # =========================================================
 sites = {
-    "ALPLA HEFEI": "GLB-Quality-Alpla_Hefei",
-    "ALPLA BRAZIL": "GLB-Quality-Alpla_Brazil",
-    "ALPLA WAIDHOFEN": "GLB-Quality-Alpla_Waidhofen"
+    "ALPLA HEFEI": "/sites/GLB-Quality-Alpla_Hefei",
+    "ALPLA BRAZIL": "/sites/GLB-Quality-Alpla_Brazil",
+    "ALPLA WAIDHOFEN": "/sites/GLB-Quality-Alpla_Waidhofen"
 }
 
 site_name = st.sidebar.selectbox("Site", list(sites.keys()))
 site_path = sites[site_name]
 
 # =========================================================
-# GET DEFAULT DRIVE (IMPORTANT FIX)
+# GET SITE ID (CORRECT GRAPH FORMAT)
 # =========================================================
-def get_drive():
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_path}/drive"
+def get_site_id():
+    url = f"https://graph.microsoft.com/v1.0/sites/sigitglobal.sharepoint.com:{site_path}"
     r = requests.get(url, headers=headers)
+
     if r.status_code != 200:
         st.error(r.text)
         st.stop()
+
+    return r.json()["id"]
+
+SITE_ID = get_site_id()
+
+# =========================================================
+# GET DRIVE (DOCUMENT LIBRARY)
+# =========================================================
+def get_drive():
+    url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive"
+    r = requests.get(url, headers=headers)
+
+    if r.status_code != 200:
+        st.error(r.text)
+        st.stop()
+
     return r.json()
 
 drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# PATH BASED ACCESS (NO SEARCH ANYMORE)
+# SAFE PATH NAVIGATION (NO SEARCH EVER)
 # =========================================================
-BASE_FOLDER = "Quality Files Exchange"
-YEAR = "2026"
-
-def get_children_by_path(path):
+def list_folder(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
     r = requests.get(url, headers=headers)
 
     if r.status_code != 200:
-        st.error(f"Path error: {path}")
+        st.error(f"Folder not found: {path}")
         st.error(r.text)
         st.stop()
 
     return r.json()["value"]
 
+BASE = "Quality Files Exchange"
+YEAR = "2026"
+
 # =========================================================
-# YEAR LEVEL
+# YEAR
 # =========================================================
-year_children = get_children_by_path(BASE_FOLDER)
+year_children = list_folder(BASE)
 year_folder = next((x for x in year_children if x["name"] == YEAR), None)
 
 if not year_folder:
-    st.error("2026 folder missing")
+    st.error("2026 not found")
     st.stop()
 
 # =========================================================
-# LINE LEVEL
+# LINE SELECTION
 # =========================================================
-line_children = get_children_by_path(f"{BASE_FOLDER}/{YEAR}")
-
-lines = [x for x in line_children if "folder" in x]
+lines = list_folder(f"{BASE}/{YEAR}")
+lines = [x for x in lines if "folder" in x]
 
 selected_line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
-LINE = selected_line
 
 # =========================================================
-# FILES
+# DATASET FILES
 # =========================================================
 files = {
     "Cap": "Cap-Measurements&Specs.xlsx",
@@ -129,22 +142,24 @@ files = {
 }
 
 selected_dataset = st.sidebar.selectbox("Dataset", list(files.keys()))
-selected_file = files[selected_dataset]
+file_name = files[selected_dataset]
 
-file_path = f"{BASE_FOLDER}/{YEAR}/{LINE}/{selected_file}"
+file_path = f"{BASE}/{YEAR}/{selected_line}/{file_name}"
 
-def download_file(path):
+# =========================================================
+# DOWNLOAD FILE
+# =========================================================
+def download(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/content"
     r = requests.get(url, headers=headers)
 
     if r.status_code != 200:
-        st.error("Download failed")
         st.error(r.text)
         st.stop()
 
     return BytesIO(r.content)
 
-excel = download_file(file_path)
+excel = download(file_path)
 
 # =========================================================
 # LOAD DATA
@@ -206,12 +221,18 @@ stats = pd.DataFrame({
     "Count": g["Value"].count()
 }).reset_index(drop=True)
 
+stats["Std"] = stats["Std"].replace(0, np.nan)
+
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
 stats["Cpk"] = np.minimum(
     (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
+# =========================================================
+# TABLE
+# =========================================================
+st.subheader("SPC Summary")
 st.dataframe(stats)
 
 # =========================================================
@@ -223,7 +244,10 @@ data = df[df["Characteristic"] == char]
 values = data["Value"].dropna()
 
 fig, ax = plt.subplots()
-ax.plot(values.values)
+ax.plot(values.values, label="Values")
 ax.axhline(stats.loc[stats["Characteristic"] == char, "USL"].values[0], linestyle="--")
 ax.axhline(stats.loc[stats["Characteristic"] == char, "LSL"].values[0], linestyle="--")
+ax.legend()
+ax.grid()
+
 st.pyplot(fig)
