@@ -77,10 +77,10 @@ sites = {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
         "folder": "Measurements-test files"
     },
-     "ALPLA Waidhofen": {
-        "site_id": "https://sigitglobal.sharepoint.com/sites/GLB-Quality-Alpla_Waidhofen:",
-        "folder": "Shared Documents/Quality Files Exchange/Measurements-test files"
-    }
+  "ALPLA Waidhofen": {
+    "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
+    "folder": "Quality Files Exchange/Measurements-test files"
+}
 }
 
 selected_site = st.sidebar.selectbox(
