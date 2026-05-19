@@ -71,7 +71,7 @@ headers = {"Authorization": f"Bearer {token['access_token']}"}
 sites = {
     "ALPLA HEFEI": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
-        "folder": "Measurements-test files"
+        "folder": "Quality Files Exchange"
     },
     "ALPLA BRAZIL": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
