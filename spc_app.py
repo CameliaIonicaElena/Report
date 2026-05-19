@@ -25,7 +25,10 @@ if not st.session_state.auth:
 
     st.subheader("Confidential Data - Access Required")
 
-    pwd = st.text_input("Enter password - Ask any GQM team member for extra info", type="password")
+    pwd = st.text_input(
+        "Enter password - Ask any GQM team member for extra info",
+        type="password"
+    )
 
     if st.button("Login"):
 
@@ -33,6 +36,7 @@ if not st.session_state.auth:
             st.session_state.auth = True
             st.success("Access granted")
             st.rerun()
+
         else:
             st.error("Wrong password")
             st.stop()
@@ -62,7 +66,9 @@ if "access_token" not in token:
     st.write(token)
     st.stop()
 
-headers = {"Authorization": f"Bearer {token['access_token']}"}
+headers = {
+    "Authorization": f"Bearer {token['access_token']}"
+}
 
 # =========================================================
 # SHAREPOINT SITES
@@ -87,11 +93,13 @@ selected_site = st.sidebar.selectbox(
 SITE_ID = sites[selected_site]["site_id"]
 
 # =========================================================
-# DRIVE
+# GET DRIVE
 # =========================================================
 @st.cache_data
 def get_drive(site_id):
+
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
+
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
@@ -110,20 +118,13 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# GENERIC GRAPH GET CHILDREN
+# GET ROOT ITEMS
 # =========================================================
-def get_children(item_id):
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{item_id}/children"
-    res = requests.get(url, headers=headers)
+@st.cache_data
+def get_root_items(drive_id):
 
-    if res.status_code != 200:
-        st.error("Cannot load folder structure")
-        st.stop()
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
 
-    return res.json().get("value", [])
-
-def get_root_children():
-    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
@@ -133,47 +134,71 @@ def get_root_children():
     return res.json().get("value", [])
 
 # =========================================================
-# COMMON STRUCTURE NAVIGATION (WORKS FOR ALL SITES)
+# GET CHILDREN
 # =========================================================
-root_items = [x for x in get_root_children() if "folder" in x]
+@st.cache_data
+def get_children(drive_id, item_id):
 
-selected_root = st.sidebar.selectbox(
-    "Folder",
-    [f["name"] for f in root_items]
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/children"
+
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot load folder content")
+        st.stop()
+
+    return res.json().get("value", [])
+
+# =========================================================
+# STEP 1 → QUALITY FILES EXCHANGE
+# =========================================================
+root_items = get_root_items(DRIVE_ID)
+
+qfe_folder = next(
+    f for f in root_items
+    if f["name"] == "Quality Files Exchange"
 )
 
-root_id = next(f["id"] for f in root_items if f["name"] == selected_root)
+QFE_ID = qfe_folder["id"]
 
-# auto go into 2026 if exists, otherwise use selected root
-level1_items = get_children(root_id)
-level1_folders = [x for x in level1_items if "folder" in x]
+# =========================================================
+# STEP 2 → AUTO SELECT 2026
+# =========================================================
+qfe_children = get_children(DRIVE_ID, QFE_ID)
 
-# try auto-detect "2026"
 year_folder = next(
-    (f for f in level1_folders if f["name"] == "2026"),
-    None
+    f for f in qfe_children
+    if f["name"] == "2026"
 )
 
-if year_folder:
-    year_id = year_folder["id"]
-    line_level_items = get_children(year_id)
-else:
-    line_level_items = level1_folders
+YEAR_ID = year_folder["id"]
 
-line_folders = [x for x in line_level_items if "folder" in x]
+# =========================================================
+# STEP 3 → SELECT LINE
+# =========================================================
+line_items = [
+    x for x in get_children(DRIVE_ID, YEAR_ID)
+    if "folder" in x
+]
 
 selected_line = st.sidebar.selectbox(
     "Select Line",
-    [l["name"] for l in line_folders]
+    [l["name"] for l in line_items]
 )
 
-line_id = next(l["id"] for l in line_folders if l["name"] == selected_line)
+LINE_ID = next(
+    l["id"] for l in line_items
+    if l["name"] == selected_line
+)
 
 # =========================================================
-# FILES
+# STEP 4 → FILES
 # =========================================================
-files_in_folder = get_children(line_id)
+files_in_folder = get_children(DRIVE_ID, LINE_ID)
 
+# =========================================================
+# DATASETS
+# =========================================================
 files = {
     "Dataset 0": "Test-Measurements&Specs.xlsx",
     "Dataset 1": "Test-Measurements&Specs1.xlsx",
@@ -187,8 +212,13 @@ selected_dataset = st.sidebar.selectbox(
 
 selected_file = files[selected_dataset]
 
+# =========================================================
+# GET FILE ID
+# =========================================================
 def get_file_id(file_name):
+
     for f in files_in_folder:
+
         if f["name"] == file_name:
             return f["id"]
 
@@ -198,10 +228,12 @@ def get_file_id(file_name):
 file_id = get_file_id(selected_file)
 
 # =========================================================
-# DOWNLOAD
+# DOWNLOAD FILE
 # =========================================================
 def download_file(file_id):
+
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
+
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
@@ -216,7 +248,9 @@ excel = download_file(file_id)
 # LOAD DATA
 # =========================================================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
+
 excel.seek(0)
+
 df_specs = pd.read_excel(excel, sheet_name="Specs")
 
 df_meas.columns = df_meas.columns.str.strip()
@@ -233,7 +267,11 @@ df_long = df_meas.melt(
     value_name="Value"
 )
 
-df = df_long.merge(df_specs, on="Characteristic", how="left")
+df = df_long.merge(
+    df_specs,
+    on="Characteristic",
+    how="left"
+)
 
 # =========================================================
 # FILTERS
@@ -253,8 +291,17 @@ df = df[
 materials = sorted(df["RAW MATERIAL"].dropna().unique())
 colors = sorted(df["COLOR"].dropna().unique())
 
-selected_rm = st.sidebar.multiselect("Raw Material", materials, default=materials)
-selected_color = st.sidebar.multiselect("Color", colors, default=colors)
+selected_rm = st.sidebar.multiselect(
+    "Raw Material",
+    materials,
+    default=materials
+)
+
+selected_color = st.sidebar.multiselect(
+    "Color",
+    colors,
+    default=colors
+)
 
 df = df[
     df["RAW MATERIAL"].isin(selected_rm) &
@@ -285,27 +332,52 @@ stats = pd.DataFrame({
 
 stats["Std"] = stats["Std"].replace(0, np.nan)
 
-stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
+stats["Cp"] = (
+    (stats["USL"] - stats["LSL"]) /
+    (6 * stats["Std"])
+)
+
 stats["Cpk"] = np.minimum(
     (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
 
-above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
-below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
+# =========================================================
+# OOS
+# =========================================================
+above = df[df["Value"] > df["USL"]].groupby(
+    "Characteristic"
+)["Value"].count()
 
-stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
-stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
+below = df[df["Value"] < df["LSL"]].groupby(
+    "Characteristic"
+)["Value"].count()
 
+stats["Above OOS"] = stats["Characteristic"].map(
+    above
+).fillna(0).astype(int)
+
+stats["Below OOS"] = stats["Characteristic"].map(
+    below
+).fillna(0).astype(int)
+
+# =========================================================
+# CAPABILITY
+# =========================================================
 def capability(cpk):
+
     if pd.isna(cpk):
         return "No data"
+
     if cpk >= 1.67:
         return "Excellent"
+
     if cpk >= 1.33:
         return "Capable"
+
     if cpk >= 1:
         return "Marginal"
+
     return "Not capable"
 
 stats["Process Capability"] = stats["Cpk"].apply(capability)
@@ -314,15 +386,38 @@ stats["Process Capability"] = stats["Cpk"].apply(capability)
 # STYLE TABLE
 # =========================================================
 def style(df):
+
     s = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    s.loc[df["Above OOS"] > 0, "Above OOS"] = "color:red;font-weight:bold"
-    s.loc[df["Below OOS"] > 0, "Below OOS"] = "color:red;font-weight:bold"
+    s.loc[
+        df["Above OOS"] > 0,
+        "Above OOS"
+    ] = "color:red;font-weight:bold"
 
-    s.loc[df["Process Capability"] == "Excellent", "Process Capability"] = "color:green;font-weight:bold"
-    s.loc[df["Process Capability"] == "Capable", "Process Capability"] = "color:goldenrod;font-weight:bold"
-    s.loc[df["Process Capability"] == "Marginal", "Process Capability"] = "color:orange;font-weight:bold"
-    s.loc[df["Process Capability"] == "Not capable", "Process Capability"] = "color:red;font-weight:bold"
+    s.loc[
+        df["Below OOS"] > 0,
+        "Below OOS"
+    ] = "color:red;font-weight:bold"
+
+    s.loc[
+        df["Process Capability"] == "Excellent",
+        "Process Capability"
+    ] = "color:green;font-weight:bold"
+
+    s.loc[
+        df["Process Capability"] == "Capable",
+        "Process Capability"
+    ] = "color:goldenrod;font-weight:bold"
+
+    s.loc[
+        df["Process Capability"] == "Marginal",
+        "Process Capability"
+    ] = "color:orange;font-weight:bold"
+
+    s.loc[
+        df["Process Capability"] == "Not capable",
+        "Process Capability"
+    ] = "color:red;font-weight:bold"
 
     return s
 
@@ -330,30 +425,120 @@ def style(df):
 # OUTPUT
 # =========================================================
 st.subheader("SPC Summary")
-st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
 
+st.dataframe(
+    stats.style.apply(style, axis=None),
+    use_container_width=True
+)
+
+# =========================================================
+# MEASUREMENT POINT
+# =========================================================
 st.markdown("## Measurement Point")
 
-char = st.selectbox("Select Characteristic", stats["Characteristic"])
+char = st.selectbox(
+    "Select Characteristic",
+    stats["Characteristic"]
+)
 
 data = df[df["Characteristic"] == char]
-spec = stats[stats["Characteristic"] == char].iloc[0]
+
+spec = stats[
+    stats["Characteristic"] == char
+].iloc[0]
+
 values = data["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
+# =========================================================
+# CONTROL CHART
+# =========================================================
 with col1:
+
     fig, ax = plt.subplots()
-    ax.plot(values.values, color="#8e44ad", linewidth=1.8)
-    ax.axhline(spec["Mean"], color="#27ae60")
-    ax.axhline(spec["USL"], color="#e74c3c", linestyle="--")
-    ax.axhline(spec["LSL"], color="#f39c12", linestyle="--")
+
+    ax.plot(
+        values.values,
+        color="#8e44ad",
+        linewidth=1.8,
+        label="Values"
+    )
+
+    ax.axhline(
+        spec["Mean"],
+        color="#27ae60",
+        label="Mean"
+    )
+
+    ax.axhline(
+        spec["USL"],
+        color="#e74c3c",
+        linestyle="--",
+        label="USL"
+    )
+
+    ax.axhline(
+        spec["LSL"],
+        color="#f39c12",
+        linestyle="--",
+        label="LSL"
+    )
+
+    ax.set_title("Control Chart")
+    ax.grid(alpha=0.3)
+    ax.legend()
+
     st.pyplot(fig)
 
+    st.caption(
+        f"Mean={spec['Mean']:.3f} | "
+        f"USL={spec['USL']:.3f} | "
+        f"LSL={spec['LSL']:.3f}"
+    )
+
+# =========================================================
+# HISTOGRAM
+# =========================================================
 with col2:
+
     fig, ax = plt.subplots()
-    ax.hist(values, bins=20, density=True, alpha=0.65)
+
+    ax.hist(
+        values,
+        bins=20,
+        density=True,
+        alpha=0.65,
+        color="#3498db",
+        edgecolor="black"
+    )
+
     if len(values) > 1:
-        x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
+
+        x = np.linspace(
+            values.min(),
+            values.max(),
+            100
+        )
+
+        ax.plot(
+            x,
+            norm.pdf(
+                x,
+                values.mean(),
+                values.std()
+            ),
+            color="#8e44ad",
+            label="Normal Fit"
+        )
+
+    ax.set_title("Histogram")
+    ax.grid(alpha=0.3)
+    ax.legend()
+
     st.pyplot(fig)
+
+    st.caption(
+        f"Std={values.std():.3f} | "
+        f"N={len(values)}"
+    )
