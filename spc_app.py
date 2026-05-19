@@ -138,7 +138,7 @@ def find_folder(drive_id, folder_name):
     st.stop()
 
 # =========================================================
-# LIST FILES
+# LIST FILES (UNCHANGED FOR HEFEI/BRAZIL)
 # =========================================================
 @st.cache_data
 def list_files(drive_id, folder_name):
@@ -154,7 +154,61 @@ def list_files(drive_id, folder_name):
 
     return res.json().get("value", [])
 
-files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
+# =========================================================
+# WAIDHOFEN FIX (REAL GRAPH STRUCTURE)
+# =========================================================
+if selected_site == "ALPLA WAIDHOFEN":
+
+    # 1. ROOT → includes "2026"
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root/children"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot load root folders")
+        st.stop()
+
+    root_items = res.json().get("value", [])
+    root_folders = [x for x in root_items if "folder" in x]
+
+    selected_root = st.sidebar.selectbox(
+        "Folder",
+        [f["name"] for f in root_folders]
+    )
+
+    root_folder = next(f for f in root_folders if f["name"] == selected_root)
+    root_id = root_folder["id"]
+
+    # 2. LINES inside 2026
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{root_id}/children"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot load line folders")
+        st.stop()
+
+    line_items = res.json().get("value", [])
+    line_folders = [x for x in line_items if "folder" in x]
+
+    selected_line = st.sidebar.selectbox(
+        "Line",
+        [l["name"] for l in line_folders]
+    )
+
+    line_folder = next(l for l in line_folders if l["name"] == selected_line)
+    line_id = line_folder["id"]
+
+    # 3. FILES inside line folder
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{line_id}/children"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot load files")
+        st.stop()
+
+    files_in_folder = res.json().get("value", [])
+
+else:
+    files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
 
 # =========================================================
 # FILES
@@ -224,53 +278,6 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
-
-# =========================================================
-# 🔥 WAIDHOFEN FIX (CORECT REAL - 2026 → LINES → FILES)
-# =========================================================
-if selected_site == "ALPLA WAIDHOFEN":
-
-    # 1. GET ROOT (includes "2026")
-    root_items = list_files(DRIVE_ID, "")
-    root_folders = [x for x in root_items if "folder" in x]
-
-    selected_root = st.sidebar.selectbox(
-        "Folder",
-        [f["name"] for f in root_folders]
-    )
-
-    root_id = next(f["id"] for f in root_folders if f["name"] == selected_root)
-
-    # 2. GET LINES INSIDE 2026
-    year_children = requests.get(
-        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{root_id}/children",
-        headers=headers
-    )
-
-    if year_children.status_code != 200:
-        st.error("Cannot load Waidhofen folder structure")
-        st.stop()
-
-    line_folders = [x for x in year_children.json().get("value", []) if "folder" in x]
-
-    selected_line = st.sidebar.selectbox(
-        "Line",
-        [l["name"] for l in line_folders]
-    )
-
-    line_id = next(l["id"] for l in line_folders if l["name"] == selected_line)
-
-    # 3. GET FILES INSIDE LINE
-    files_req = requests.get(
-        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{line_id}/children",
-        headers=headers
-    )
-
-    if files_req.status_code != 200:
-        st.error("Cannot load files in line folder")
-        st.stop()
-
-    files_in_folder = files_req.json().get("value", [])
 
 # =========================================================
 # FILTERS
@@ -365,7 +372,7 @@ def style(df):
     return s
 
 # =========================================================
-# OUTPUT (UNCHANGED)
+# OUTPUT
 # =========================================================
 st.subheader("SPC Summary")
 st.dataframe(stats.style.apply(style, axis=None), use_container_width=True)
