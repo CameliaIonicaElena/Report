@@ -80,7 +80,6 @@ sites = {
    "ALPLA Waidhofen": {
     "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
     "folder": "Quality Files Exchange/2026/Measurements-test files"
-}
     }
 }
 
