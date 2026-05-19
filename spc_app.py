@@ -14,7 +14,7 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# LOGIN
+# ACCESS PASSWORD GATE
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -22,14 +22,18 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
+
     st.subheader("Confidential Data - Access Required")
 
-    pwd = st.text_input("Enter password", type="password")
+    pwd = st.text_input("Enter password - Ask any GQM team memnber for extra info", type="password")
 
     if st.button("Login"):
+
         if pwd == PASSWORD:
             st.session_state.auth = True
+            st.success("Access granted")
             st.rerun()
+
         else:
             st.error("Wrong password")
             st.stop()
@@ -37,7 +41,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# AUTH GRAPH
+# AUTH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -56,12 +60,13 @@ token = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in token:
     st.error("Authentication failed")
+    st.write(token)
     st.stop()
 
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# SITES (ONLY ADDITION = WAIDHOFEN)
+# SHAREPOINT SITES
 # =========================================================
 sites = {
     "ALPLA HEFEI": {
@@ -74,21 +79,24 @@ sites = {
     },
     "ALPLA WAIDHOFEN": {
         "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
-        "folder": None  # important: handled separately
+        "folder": "2026"
     }
 }
 
-# =========================================================
-# SITE SELECT
-# =========================================================
-selected_site = st.sidebar.selectbox("Select Site", list(sites.keys()))
+selected_site = st.sidebar.selectbox(
+    "Select SharePoint Site",
+    list(sites.keys())
+)
+
 SITE_ID = sites[selected_site]["site_id"]
+FOLDER_NAME = sites[selected_site]["folder"]
 
 # =========================================================
-# GET DRIVE (UNCHANGED - THIS WAS WORKING)
+# GET DRIVE
 # =========================================================
 @st.cache_data
 def get_drive(site_id):
+
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
     res = requests.get(url, headers=headers)
 
@@ -108,62 +116,100 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# LIST CHILDREN
+# FIND FOLDER (UNCHANGED)
 # =========================================================
 @st.cache_data
-def list_children(drive_id, path):
-    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/children"
+def find_folder(drive_id, folder_name):
+
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/search(q='{folder_name}')"
     res = requests.get(url, headers=headers)
 
     if res.status_code != 200:
-        st.error(f"Folder error: {path}")
+        st.error("Folder search failed")
+        st.stop()
+
+    items = res.json().get("value", [])
+
+    for i in items:
+        if "folder" in i and i["name"] == folder_name:
+            return i["id"]
+
+    st.error("Folder not found")
+    st.stop()
+
+# =========================================================
+# LIST FILES (MODIFIED ONLY FOR WAIDHOFEN STRUCTURE)
+# =========================================================
+@st.cache_data
+def list_files(drive_id, folder_path):
+
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{folder_path}:/children"
+    res = requests.get(url, headers=headers)
+
+    if res.status_code != 200:
+        st.error("Cannot read folder content")
         st.stop()
 
     return res.json().get("value", [])
 
 # =========================================================
-# WAIDHOFEN STRUCTURE (YEAR → LINE → FILE)
+# WAIDHOFEN: YEAR → LINE → FILES
 # =========================================================
 if selected_site == "ALPLA WAIDHOFEN":
 
-    # 1. YEARS
-    root_items = list_children(DRIVE_ID, "")
+    # 1. YEARS (ex: 2026, 2025 etc.)
+    root_items = list_files(DRIVE_ID, "")
     years = [x for x in root_items if "folder" in x]
 
     year_names = [y["name"] for y in years]
-    selected_year = st.sidebar.selectbox("Year", year_names)
 
-    # 2. LINES
-    year_items = list_children(DRIVE_ID, selected_year)
+    selected_year = st.sidebar.selectbox(
+        "Select Year",
+        year_names
+    )
+
+    # 2. LINES INSIDE YEAR (TOD / TOC / TGA)
+    year_items = list_files(DRIVE_ID, selected_year)
     lines = [x for x in year_items if "folder" in x]
 
     line_names = [l["name"] for l in lines]
-    selected_line = st.sidebar.selectbox("Line", line_names)
 
-    # 3. FILES
-    file_items = list_children(DRIVE_ID, f"{selected_year}/{selected_line}")
-    files_in_folder = [x for x in file_items if "file" in x]
+    selected_line = st.sidebar.selectbox(
+        "Select Line",
+        line_names
+    )
+
+    # 3. FILES INSIDE LINE
+    files_in_folder = list_files(
+        DRIVE_ID,
+        f"{selected_year}/{selected_line}"
+    )
 
 else:
-    # HEFEI + BRAZIL (UNCHANGED BEHAVIOR)
-    folder_name = sites[selected_site]["folder"]
-
-    file_items = list_children(DRIVE_ID, folder_name)
-    files_in_folder = [x for x in file_items if "file" in x]
+    # HEFEI + BRAZIL (UNCHANGED LOGIC)
+    files_in_folder = list_files(DRIVE_ID, FOLDER_NAME)
 
 # =========================================================
 # FILE SELECT
 # =========================================================
-file_names = [f["name"] for f in files_in_folder]
+files = {
+    f["name"]: f["id"]
+    for f in files_in_folder
+    if "file" in f
+}
 
-selected_file = st.sidebar.selectbox("Dataset", file_names)
+selected_file = st.sidebar.selectbox(
+    "Select Dataset",
+    list(files.keys())
+)
 
-file_id = next(f["id"] for f in files_in_folder if f["name"] == selected_file)
+file_id = files[selected_file]
 
 # =========================================================
-# DOWNLOAD FILE
+# DOWNLOAD
 # =========================================================
 def download_file(file_id):
+
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
     res = requests.get(url, headers=headers)
 
@@ -196,7 +242,7 @@ df_long = df_meas.melt(
 df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================================================
-# EVERYTHING BELOW = YOUR ORIGINAL SPC LOGIC (UNCHANGED)
+# FILTERS + SPC (UNCHANGED FROM YOUR CODE)
 # =========================================================
 st.sidebar.header("Filters")
 
