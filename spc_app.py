@@ -58,16 +58,26 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# SITES
+# PLANTS (KEEP WAIDHOFEN LOGIC = FIXED ROOT FOLDER)
 # =========================================================
 sites = {
-    "ALPLA HEFEI": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
-    "ALPLA BRAZIL": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
-    "ALPLA WAIDHOFEN": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:"
+    "ALPLA HEFEI": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
+        "folder": "Quality Files Exchange"
+    },
+    "ALPLA BRAZIL": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
+        "folder": "Quality Files Exchange"
+    },
+    "ALPLA WAIDHOFEN": {
+        "site_id": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:",
+        "folder": "Quality Files Exchange"
+    }
 }
 
 plant = st.sidebar.selectbox("Plant", list(sites.keys()))
-SITE_ID = sites[plant]
+SITE_ID = sites[plant]["site_id"]
+ROOT_FOLDER = sites[plant]["folder"]
 
 # =========================================================
 # DRIVE
@@ -81,7 +91,7 @@ drive = get_drive(SITE_ID)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SIMPLE HELPERS (IMPORTANT: NO RECURSIVE SEARCH)
+# SAFE FOLDER ACCESS (NO SEARCH - SAME LOGIC AS WAIDHOFEN)
 # =========================================================
 def children(folder_id):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{folder_id}/children"
@@ -94,29 +104,41 @@ def root_children():
     return r.json().get("value", [])
 
 # =========================================================
-# STEP 1: FIND 2026 (DIRECT, NOT SEARCH)
+# STEP 1: FIND ROOT FOLDER (Quality Files Exchange)
 # =========================================================
 root = root_children()
 
-year_folder = next((x for x in root if x["name"] == "2026"), None)
+qfe = next((x for x in root if x["name"] == ROOT_FOLDER), None)
 
-if not year_folder:
-    st.error("Folder 2026 not found in root")
+if not qfe:
+    st.error(f"{ROOT_FOLDER} not found in root")
     st.stop()
 
-YEAR_ID = year_folder["id"]
+QFE_ID = qfe["id"]
 
 # =========================================================
-# STEP 2: LINES
+# STEP 2: YEAR = 2026
 # =========================================================
-line_folders = [x for x in children(YEAR_ID) if "folder" in x]
+qfe_children = children(QFE_ID)
 
-line_name = st.sidebar.selectbox("Line", [l["name"] for l in line_folders])
+year = next((x for x in qfe_children if x["name"] == "2026"), None)
 
-LINE_ID = next(l["id"] for l in line_folders if l["name"] == line_name)
+if not year:
+    st.error("2026 not found")
+    st.stop()
+
+YEAR_ID = year["id"]
 
 # =========================================================
-# STEP 3: FILES
+# STEP 3: LINES
+# =========================================================
+lines = [x for x in children(YEAR_ID) if "folder" in x]
+
+line = st.sidebar.selectbox("Line", [l["name"] for l in lines])
+LINE_ID = next(l["id"] for l in lines if l["name"] == line)
+
+# =========================================================
+# STEP 4: FILES
 # =========================================================
 files_in_folder = children(LINE_ID)
 
@@ -149,7 +171,7 @@ def download(file_id):
 excel = download(file_id)
 
 # =========================================================
-# DATA
+# DATA PROCESSING (UNCHANGED)
 # =========================================================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
@@ -195,14 +217,11 @@ colors = st.sidebar.multiselect(
 df = df[df["RAW MATERIAL"].isin(materials) & df["COLOR"].isin(colors)]
 
 # =========================================================
-# LIMITS
+# STATS + LIMITS
 # =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
-# =========================================================
-# STATS
-# =========================================================
 g = df.groupby("Characteristic")
 
 stats = pd.DataFrame({
@@ -225,7 +244,7 @@ stats["Cpk"] = np.minimum(
 )
 
 # =========================================================
-# OOS
+# OOS + CAPABILITY
 # =========================================================
 above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
 below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
@@ -233,9 +252,6 @@ below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
 
-# =========================================================
-# CAPABILITY
-# =========================================================
 def cap(x):
     if pd.isna(x): return "No data"
     if x >= 1.67: return "Excellent"
