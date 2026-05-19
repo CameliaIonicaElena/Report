@@ -14,7 +14,7 @@ st.set_page_config(page_title="SPC Dashboard", layout="wide")
 st.title("SPC Dashboard")
 
 # =========================================================
-# AUTH GATE
+# PASSWORD
 # =========================================================
 PASSWORD = "ShowRepoGQM31"
 
@@ -22,7 +22,9 @@ if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    pwd = st.text_input("Password", type="password")
+    st.subheader("Confidential Data - Access Required")
+    pwd = st.text_input("Enter password", type="password")
+
     if st.button("Login"):
         if pwd == PASSWORD:
             st.session_state.auth = True
@@ -32,7 +34,7 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================================================
-# GRAPH AUTH
+# AUTH GRAPH
 # =========================================================
 CLIENT_ID = st.secrets["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
@@ -44,7 +46,7 @@ app = ConfidentialClientApplication(
     client_credential=CLIENT_SECRET
 )
 
-token = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
+token = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
 
 if "access_token" not in token:
     st.error("Auth failed")
@@ -56,100 +58,90 @@ headers = {"Authorization": f"Bearer {token['access_token']}"}
 # SITES
 # =========================================================
 sites = {
-    "ALPLA HEFEI": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Hefei:",
-    "ALPLA BRAZIL": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Brazil:",
-    "ALPLA WAIDHOFEN": "sigitglobal.sharepoint.com:/sites/GLB-Quality-Alpla_Waidhofen:"
+    "ALPLA HEFEI": "GLB-Quality-Alpla_Hefei",
+    "ALPLA BRAZIL": "GLB-Quality-Alpla_Brazil",
+    "ALPLA WAIDHOFEN": "GLB-Quality-Alpla_Waidhofen"
 }
 
-selected_site = st.sidebar.selectbox("Site", list(sites.keys()))
-SITE_ID = sites[selected_site]
+selected_site = st.sidebar.selectbox("Plant", list(sites.keys()))
+site_name = sites[selected_site]
+
+site_id_url = f"sigitglobal.sharepoint.com:/sites/{site_name}:"
 
 # =========================================================
 # DRIVE
 # =========================================================
+@st.cache_data
 def get_drive(site_id):
-    r = requests.get(
-        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
-        headers=headers
-    )
+    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives"
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
 
-    if r.status_code != 200:
-        st.error(r.text)
-        st.stop()
-
+    for d in r.json()["value"]:
+        if d["name"] in ["Documents", "Shared Documents"]:
+            return d
     return r.json()["value"][0]
 
-drive = get_drive(SITE_ID)
+drive = get_drive(site_id_url)
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE CHILDREN
+# SAFE LIST CHILDREN
 # =========================================================
-def children(folder_id):
-    r = requests.get(
-        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{folder_id}/children",
-        headers=headers
-    )
-
-    if r.status_code != 200:
-        st.error(r.text)
-        st.stop()
-
+@st.cache_data
+def list_children(drive_id, item_id):
+    url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/children"
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
     return r.json().get("value", [])
 
 # =========================================================
-# ROOT
+# FIND ROOT ITEM SAFELY (NO SEARCH)
 # =========================================================
-root = children("root")
+def find_item_by_name(children, name):
+    for x in children:
+        if x["name"] == name:
+            return x
+    return None
 
 # =========================================================
-# FIND "Shared Documents" FIRST (CRITICAL FIX)
+# ROOT DRIVE ITEMS
 # =========================================================
-shared = next(
-    (x for x in root if x.get("name") in ["Shared Documents", "Documents"]),
-    None
-)
+root_items = list_children(DRIVE_ID, "root")
 
-if not shared:
-    st.error("No document library found")
+shared_docs = find_item_by_name(root_items, "Shared Documents")
+if not shared_docs:
+    st.error("Shared Documents not found")
     st.stop()
 
-shared_id = shared["id"]
+# =========================================================
+# QUALITY FILES EXCHANGE (SAFE NAVIGATION)
+# =========================================================
+shared_children = list_children(DRIVE_ID, shared_docs["id"])
 
-# =========================================================
-# NOW FIND QUALITY FILES EXCHANGE SAFELY
-# =========================================================
-qfe = next(
-    (x for x in children(shared_id)
-     if "Quality Files Exchange" in x.get("name", "")),
-    None
-)
+qfe = find_item_by_name(shared_children, "Quality Files Exchange")
 
 if not qfe:
-    st.error("Quality Files Exchange not found (check SharePoint library path)")
+    st.error("Quality Files Exchange NOT FOUND in Shared Documents")
     st.stop()
 
-qfe_id = qfe["id"]
+qfe_children = list_children(DRIVE_ID, qfe["id"])
 
 # =========================================================
-# YEAR 2026
+# YEAR (AUTO 2026)
 # =========================================================
-year = next(
-    (x for x in children(qfe_id)
-     if x.get("name") == "2026"),
-    None
-)
+year = find_item_by_name(qfe_children, "2026")
 
 if not year:
-    st.error("2026 not found")
+    st.error("2026 folder not found")
     st.stop()
 
-year_id = year["id"]
+year_children = list_children(DRIVE_ID, year["id"])
 
 # =========================================================
-# LINES
+# LINE SELECTION
 # =========================================================
-lines = [x for x in children(year_id) if "folder" in x]
+lines = [x for x in year_children if "folder" in x]
 
 selected_line = st.sidebar.selectbox(
     "Line",
@@ -158,39 +150,36 @@ selected_line = st.sidebar.selectbox(
 
 line_id = next(l["id"] for l in lines if l["name"] == selected_line)
 
+files_in_line = list_children(DRIVE_ID, line_id)
+
 # =========================================================
-# FILES
+# DATASETS
 # =========================================================
-files = {
+files_map = {
     "Cap": "Cap-Measurements&Specs.xlsx",
     "Flange": "Flange-Measurements&Specs.xlsx",
     "Cutting Ring": "Cutting-Ring-Measurements&Specs.xlsx"
 }
 
-selected = st.sidebar.selectbox("Dataset", list(files.keys()))
-file_name = files[selected]
+dataset = st.sidebar.selectbox("Dataset", list(files_map.keys()))
+file_name = files_map[dataset]
 
-files_in_line = children(line_id)
-
-file_id = next((f["id"] for f in files_in_line if f["name"] == file_name), None)
-
-if not file_id:
-    st.error(f"File not found: {file_name}")
+def get_file_id(name):
+    for f in files_in_line:
+        if f["name"] == name:
+            return f["id"]
+    st.error(f"File not found: {name}")
     st.stop()
+
+file_id = get_file_id(file_name)
 
 # =========================================================
 # DOWNLOAD
 # =========================================================
-def download(fid):
-    r = requests.get(
-        f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{fid}/content",
-        headers=headers
-    )
-
-    if r.status_code != 200:
-        st.error("Download failed")
-        st.stop()
-
+def download(file_id):
+    url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/items/{file_id}/content"
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
     return BytesIO(r.content)
 
 excel = download(file_id)
@@ -207,11 +196,13 @@ df_specs.columns = df_specs.columns.str.strip()
 
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
-df = df_meas.melt(
+df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
     var_name="Characteristic",
     value_name="Value"
-).merge(df_specs, on="Characteristic", how="left")
+)
+
+df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================================================
 # FILTERS
@@ -219,11 +210,12 @@ df = df_meas.melt(
 st.sidebar.header("Filters")
 
 start, end = st.sidebar.date_input(
-    "Date range",
+    "Date",
     value=(df["DATE"].min(), df["DATE"].max())
 )
 
-df = df[(df["DATE"] >= pd.to_datetime(start)) & (df["DATE"] <= pd.to_datetime(end))]
+df = df[(df["DATE"] >= pd.to_datetime(start)) &
+        (df["DATE"] <= pd.to_datetime(end))]
 
 rm = st.sidebar.multiselect(
     "Raw Material",
@@ -231,16 +223,16 @@ rm = st.sidebar.multiselect(
     default=sorted(df["RAW MATERIAL"].dropna().unique())
 )
 
-col = st.sidebar.multiselect(
+color = st.sidebar.multiselect(
     "Color",
     sorted(df["COLOR"].dropna().unique()),
     default=sorted(df["COLOR"].dropna().unique())
 )
 
-df = df[df["RAW MATERIAL"].isin(rm) & df["COLOR"].isin(col)]
+df = df[df["RAW MATERIAL"].isin(rm) & df["COLOR"].isin(color)]
 
 # =========================================================
-# LIMITS
+# STATS
 # =========================================================
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
@@ -248,41 +240,18 @@ df["LSL"] = df["Target"] + df["Lower Dev"]
 g = df.groupby("Characteristic")
 
 stats = pd.DataFrame({
-    "Characteristic": g["Characteristic"].first(),
-    "USL": g["USL"].first(),
-    "LSL": g["LSL"].first(),
+    "Characteristic": g["Value"].count().index,
     "Mean": g["Value"].mean(),
     "Std": g["Value"].std(),
-    "Max": g["Value"].max(),
-    "Min": g["Value"].min(),
-    "Count": g["Value"].count()
+    "USL": g["USL"].first(),
+    "LSL": g["LSL"].first(),
 }).reset_index(drop=True)
-
-stats["Std"] = stats["Std"].replace(0, np.nan)
 
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
 stats["Cpk"] = np.minimum(
     (stats["USL"] - stats["Mean"]) / (3 * stats["Std"]),
     (stats["Mean"] - stats["LSL"]) / (3 * stats["Std"])
 )
-
-# =========================================================
-# OOS + CAPABILITY
-# =========================================================
-above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
-below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
-
-stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
-stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
-
-def cap(cpk):
-    if pd.isna(cpk): return "No data"
-    if cpk >= 1.67: return "Excellent"
-    if cpk >= 1.33: return "Capable"
-    if cpk >= 1: return "Marginal"
-    return "Not capable"
-
-stats["Process Capability"] = stats["Cpk"].apply(cap)
 
 # =========================================================
 # OUTPUT
@@ -292,25 +261,24 @@ st.dataframe(stats)
 
 char = st.selectbox("Characteristic", stats["Characteristic"])
 
-data = df[df["Characteristic"] == char]
-spec = stats[stats["Characteristic"] == char].iloc[0]
-values = data["Value"].dropna()
+d = df[df["Characteristic"] == char]
+s = stats[stats["Characteristic"] == char].iloc[0]
+vals = d["Value"].dropna()
 
 col1, col2 = st.columns(2)
 
 with col1:
     fig, ax = plt.subplots()
-    ax.plot(values.values)
-    ax.axhline(spec["Mean"])
-    ax.axhline(spec["USL"], linestyle="--")
-    ax.axhline(spec["LSL"], linestyle="--")
-    ax.grid()
+    ax.plot(vals.values)
+    ax.axhline(s["Mean"])
+    ax.axhline(s["USL"], linestyle="--")
+    ax.axhline(s["LSL"], linestyle="--")
     st.pyplot(fig)
 
 with col2:
     fig, ax = plt.subplots()
-    ax.hist(values, bins=20, density=True)
-    if len(values) > 1:
-        x = np.linspace(values.min(), values.max(), 100)
-        ax.plot(x, norm.pdf(x, values.mean(), values.std()))
+    ax.hist(vals, bins=20, density=True)
+    if len(vals) > 1:
+        x = np.linspace(vals.min(), vals.max(), 100)
+        ax.plot(x, norm.pdf(x, vals.mean(), vals.std()))
     st.pyplot(fig)
