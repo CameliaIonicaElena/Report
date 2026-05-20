@@ -76,7 +76,8 @@ sites = {
     "ALPLA HEFEI": "/sites/GLB-Quality-Alpla_Hefei",
     "ALPLA BRAZIL": "/sites/GLB-Quality-Alpla_Brazil",
     "ALPLA WAIDHOFEN": "/sites/GLB-Quality-Alpla_Waidhofen",
-    "ALPLA SPAIN":"/sites/EU-Quality-Alpla_Spain"
+    "ALPLA SPAIN":"/sites/EU-Quality-Alpla_Spain",
+    "ALPLA THAILAND":"/sites/GLB-Quality-Alpla_Thailand"
 }
 
 site_name = st.sidebar.selectbox("Site", list(sites.keys()))
