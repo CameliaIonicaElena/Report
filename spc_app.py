@@ -73,12 +73,15 @@ def section_title(text):
 # SITES
 # =========================================================
 sites = {
-    "ALPLA HEFEI": "/sites/GLB-Quality-Alpla_Hefei",
-    "ALPLA BRAZIL": "/sites/GLB-Quality-Alpla_Brazil",
-    "ALPLA WAIDHOFEN": "/sites/GLB-Quality-Alpla_Waidhofen",
-    "ALPLA SPAIN":"/sites/EU-Quality-Alpla_Spain",
-    "ALPLA THAILAND":"/sites/GLB-Quality-Alpla_Thailand",
-    "ALPLA MEXICO":"/sites/GLB-Quality-Alpla_Mexico"
+    "ALPLA Hefei": "/sites/GLB-Quality-Alpla_Hefei",
+    "ALPLA Brazil": "/sites/GLB-Quality-Alpla_Brazil",
+    "ALPLA Waidhofen": "/sites/GLB-Quality-Alpla_Waidhofen",
+    "ALPLA Spain":"/sites/EU-Quality-Alpla_Spain",
+    "ALPLA Thailand":"/sites/GLB-Quality-Alpla_Thailand",
+    "ALPLA Mexico":"/sites/GLB-Quality-Alpla_Mexico",
+    "JABIL Spain":"/sites/GLB-Quality-Jabil_Spain",
+    "JABIL Hungary":"/sites/GLB-Quality-Jabil_Hungary",
+    "BERICAP":"/sites/BERICAP"
 }
 
 site_name = st.sidebar.selectbox("Site", list(sites.keys()))
