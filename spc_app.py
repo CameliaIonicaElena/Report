@@ -75,7 +75,8 @@ def section_title(text):
 sites = {
     "ALPLA HEFEI": "/sites/GLB-Quality-Alpla_Hefei",
     "ALPLA BRAZIL": "/sites/GLB-Quality-Alpla_Brazil",
-    "ALPLA WAIDHOFEN": "/sites/GLB-Quality-Alpla_Waidhofen"
+    "ALPLA WAIDHOFEN": "/sites/GLB-Quality-Alpla_Waidhofen",
+    "ALPLA SPAIN":"/sites/EU-Quality-Alpla_Spain"
 }
 
 site_name = st.sidebar.selectbox("Site", list(sites.keys()))
