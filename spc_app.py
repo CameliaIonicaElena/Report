@@ -81,7 +81,8 @@ sites = {
     "ALPLA Mexico":"/sites/GLB-Quality-Alpla_Mexico",
     "JABIL Spain":"/sites/GLB-Quality-Jabil_Spain",
     "JABIL Hungary":"/sites/GLB-Quality-Jabil_Hungary",
-    "BERICAP":"/sites/BERICAP"
+    "BERICAP":"/sites/BERICAP",
+    "Obeikan":"/sites/ORP_-_Obeikan"
 }
 
 site_name = st.sidebar.selectbox("Site", list(sites.keys()))
