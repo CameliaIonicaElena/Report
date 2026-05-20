@@ -82,7 +82,11 @@ sites = {
     "JABIL Spain":"/sites/GLB-Quality-Jabil_Spain",
     "JABIL Hungary":"/sites/GLB-Quality-Jabil_Hungary",
     "BERICAP":"/sites/BERICAP",
-    "Obeikan":"/sites/ORP_-_Obeikan"
+    "Obeikan":"/sites/ORP_-_Obeikan",
+    "PNE":"/sites/SIG_PNE",
+    "Scholle":"/sites/Scholle_IPN",
+    "Vinhedo":"/sites/GLB-Quality-SIG-Vinhedo",
+    "Peachtree":"/sites/GLB-Quality-SIG-Peachtree"
 }
 
 site_name = st.sidebar.selectbox("Site", list(sites.keys()))
