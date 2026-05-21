@@ -378,7 +378,7 @@ def style(df):
 # =========================================================
 st.sidebar.markdown("---")
 
-show_overview = st.sidebar.button("Show Global OOS Overview")
+show_overview = st.sidebar.button("Show OOS Overview")
 
 if show_overview:
 
@@ -471,7 +471,7 @@ if show_overview:
             except:
                 pass
 
-    section_title("Global Out Of Spec Overview")
+    section_title("Out Of Spec Overview")
 
     if overview_rows:
 
