@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from msal import ConfidentialClientApplication
 import requests
-from io import BytesIO
+from io import BytesIO 
 
 # =========================================================
 # PAGE
