@@ -524,9 +524,15 @@ char = st.selectbox(
 
 data = df[df["Characteristic"] == char]
 
-spec = stats[
+filtered_spec = stats[
     stats["Characteristic"] == char
-].iloc[0]
+]
+
+if filtered_spec.empty:
+    st.error(f"No specification found for '{char}'")
+    st.stop()
+
+spec = filtered_spec.iloc[0]
 
 values = data["Value"].dropna()
 
