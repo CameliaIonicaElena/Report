@@ -5,9 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from msal import ConfidentialClientApplication
 import requests
-from io import BytesIO
-import unicodedata
-import re
+from io import BytesIO 
 
 # =========================================================
 # PAGE
@@ -59,34 +57,13 @@ if "access_token" not in token:
 headers = {"Authorization": f"Bearer {token['access_token']}"}
 
 # =========================================================
-# CLEAN FUNCTION (CRITICAL FIX)
+# CLEAN FUNCTION (IMPORTANT FIX)
 # =========================================================
-def clean_char(x):
-    if pd.isna(x):
-        return np.nan
-
-    x = str(x)
-    x = unicodedata.normalize("NFKC", x)
-    x = x.replace("\u00a0", " ")
-    x = x.replace("\u200b", "")
-    x = x.strip().lower()
-    x = re.sub(r"\s+", " ", x)
-
-    return x
-
-# =========================================================
-# UI STYLES
-# =========================================================
-def blue_title(text, size=28):
-    st.markdown(
-        f"<h1 style='color:#A7C7E7; font-size:{size}px; font-weight:700;'>{text}</h1>",
-        unsafe_allow_html=True
-    )
-
-def section_title(text):
-    st.markdown(
-        f"<h2 style='color:#A7C7E7; font-weight:600;'>{text}</h2>",
-        unsafe_allow_html=True
+def clean_text(x):
+    return (
+        str(x)
+        .replace("\xa0", " ")
+        .strip()
     )
 
 # =========================================================
@@ -144,7 +121,7 @@ drive = get_drive()
 DRIVE_ID = drive["id"]
 
 # =========================================================
-# SAFE PATH
+# SAFE PATH NAVIGATION
 # =========================================================
 def list_folder(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/children"
@@ -192,7 +169,7 @@ file_name = files[dataset]
 file_path = f"{BASE}/{YEAR}/{LINE}/{file_name}"
 
 # =========================================================
-# DOWNLOAD
+# DOWNLOAD FILE
 # =========================================================
 def download_file(path):
     url = f"https://graph.microsoft.com/v1.0/drives/{DRIVE_ID}/root:/{path}:/content"
@@ -210,23 +187,22 @@ if excel is None:
     st.stop()
 
 # =========================================================
-# LOAD DATA (FIX: CLEAN EXCEL STRUCTURE)
+# LOAD DATA
 # =========================================================
 df_meas = pd.read_excel(excel, sheet_name="Measurements")
 excel.seek(0)
 df_specs = pd.read_excel(excel, sheet_name="Specs")
 
-df_meas.columns = df_meas.columns.astype(str).str.strip()
-df_specs.columns = df_specs.columns.astype(str).str.strip()
+df_meas.columns = df_meas.columns.str.strip().map(clean_text)
+df_specs.columns = df_specs.columns.str.strip().map(clean_text)
 
-# remove ghost columns
-df_meas = df_meas.dropna(axis=1, how="all")
-df_meas = df_meas.loc[:, ~df_meas.columns.str.contains("^Unnamed")]
+# FIX SPEC CHARACTERISTIC
+df_specs["Characteristic"] = df_specs["Characteristic"].map(clean_text)
 
 df_meas["DATE"] = pd.to_datetime(df_meas["DATE"])
 
 # =========================================================
-# TRANSFORM (FIXED)
+# TRANSFORM
 # =========================================================
 df_long = df_meas.melt(
     id_vars=["DATE", "RAW MATERIAL", "COLOR", "CAV"],
@@ -234,23 +210,14 @@ df_long = df_meas.melt(
     value_name="Value"
 )
 
+# FIX MELT RESULT
+df_long["Characteristic"] = df_long["Characteristic"].map(clean_text)
+
+# REMOVE INVALID ROWS (CRITICAL)
 df_long = df_long.dropna(subset=["Characteristic"])
-df_long = df_long[df_long["Characteristic"].astype(str).str.strip() != ""]
+df_long = df_long[df_long["Characteristic"] != "None"]
 
-df_long["Characteristic"] = df_long["Characteristic"].apply(clean_char)
-df_specs["Characteristic"] = df_specs["Characteristic"].apply(clean_char)
-
-# =========================================================
-# MERGE (FIXED)
-# =========================================================
-df = df_long.merge(
-    df_specs,
-    on="Characteristic",
-    how="left",
-    validate="m:1"
-)
-
-df = df.dropna(subset=["Target", "Upper Dev", "Lower Dev"])
+df = df_long.merge(df_specs, on="Characteristic", how="left")
 
 # =========================================================
 # FILTERS
@@ -296,6 +263,9 @@ stats = pd.DataFrame({
     "Count": g["Value"].count()
 }).reset_index(drop=True)
 
+# IMPORTANT FIX
+stats["Characteristic"] = stats["Characteristic"].map(clean_text)
+
 stats["Std"] = stats["Std"].replace(0, np.nan)
 
 stats["Cp"] = (stats["USL"] - stats["LSL"]) / (6 * stats["Std"])
@@ -308,8 +278,8 @@ stats["Cpk"] = np.minimum(
 # =========================================================
 # OOS
 # =========================================================
-above = (df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count())
-below = (df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count())
+above = df[df["Value"] > df["USL"]].groupby("Characteristic")["Value"].count()
+below = df[df["Value"] < df["LSL"]].groupby("Characteristic")["Value"].count()
 
 stats["Above OOS"] = stats["Characteristic"].map(above).fillna(0).astype(int)
 stats["Below OOS"] = stats["Characteristic"].map(below).fillna(0).astype(int)
@@ -329,3 +299,12 @@ def capability(cpk):
     return "Not capable"
 
 stats["Process Capability"] = stats["Cpk"].apply(capability)
+
+# =========================================================
+# FIX FINAL MATCH ERROR SOURCE
+# =========================================================
+stats = stats.dropna(subset=["Characteristic"])
+
+# =========================================================
+# REST OF CODE UNCHANGED
+# =========================================================
