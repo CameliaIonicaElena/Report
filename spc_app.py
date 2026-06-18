@@ -518,8 +518,9 @@ st.markdown(
 )
 
 char = st.selectbox(
-    "",
-    stats["Characteristic"]
+    "Characteristic",
+    stats["Characteristic"].tolist(),
+    key=f"char_{dataset}"
 )
 
 data = df[df["Characteristic"] == char]
