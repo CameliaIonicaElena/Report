@@ -243,6 +243,7 @@ df = df[
             "Material",
             materials,
             default=materials
+            key=f"mat_{dataset}"
         )
     ) &
     df["COLOR"].isin(
@@ -250,6 +251,7 @@ df = df[
             "Color",
             colors,
             default=colors
+            key=f"col_{dataset}"
         )
     )
 ]
