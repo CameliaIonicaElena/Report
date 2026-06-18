@@ -242,7 +242,7 @@ df = df[
         st.sidebar.multiselect(
             "Material",
             materials,
-            default=materials
+            default=materials,
             key=f"mat_{dataset}"
         )
     ) &
@@ -250,7 +250,7 @@ df = df[
         st.sidebar.multiselect(
             "Color",
             colors,
-            default=colors
+            default=colors,
             key=f"col_{dataset}"
         )
     )
