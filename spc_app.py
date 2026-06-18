@@ -219,7 +219,8 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
-
+st.write("Rows after merge:", len(df))
+st.write(df.head())
 # =========================================================
 # FILTERS
 # =========================================================
@@ -259,6 +260,8 @@ df = df[
 df["USL"] = df["Target"] + df["Upper Dev"]
 df["LSL"] = df["Target"] + df["Lower Dev"]
 
+st.write("Rows after filters:", len(df))
+st.write(df.head())
 g = df.groupby("Characteristic")
 
 stats = pd.DataFrame({
