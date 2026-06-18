@@ -517,11 +517,17 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+
+st.write("Available characteristics:")
+st.write(stats["Characteristic"].tolist())
 char = st.selectbox(
     "Characteristic",
     stats["Characteristic"].tolist(),
     key=f"char_{dataset}"
 )
+st.write("Dataset:", dataset)
+st.write("Selected characteristic:", repr(char))
+
 
 data = df[df["Characteristic"] == char]
 
