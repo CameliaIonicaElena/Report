@@ -218,6 +218,15 @@ df_long = df_meas.melt(
 )
 
 df = df_long.merge(df_specs, on="Characteristic", how="left")
+
+----ADDED NOW
+
+df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
+df = df.dropna(subset=["Value"])
+
+----
+
+
 st.write("Rows after merge:", len(df))
 st.write(df.head())
 # =========================================================
